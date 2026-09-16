@@ -92,7 +92,7 @@ final class PhysicsEngine {
         stopSpeed = geometry.ballRadius * 0.5
     }
 
-    var maxShotSpeed: CGFloat { geometry.ballRadius * 160 }
+    var maxShotSpeed: CGFloat { geometry.ballRadius * 320 }
     var minShotSpeed: CGFloat { geometry.ballRadius * 12 }
 
     func step(dt: CGFloat, balls: [Ball], shot: inout ShotRecord) -> StepEvents {
