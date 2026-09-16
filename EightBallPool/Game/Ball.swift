@@ -14,10 +14,9 @@ final class Ball {
     let number: Int
     var position: CGPoint
     var velocity: CGVector = .zero
-    /// Follow/draw: surface slip velocity relative to the cloth (speed units). Friction converts it into velocity.
-    var spin: CGVector = .zero
-    /// English: rim speed about the vertical axis (speed units); positive is counter-clockwise from above.
-    var sideSpin: CGFloat = 0
+    /// Angular velocity in rad/s. x/y are the horizontal axes (follow, draw and natural roll live here);
+    /// z is english, positive counter-clockwise seen from above.
+    var angularVelocity = SIMD3<Double>(repeating: 0)
     var isPocketed = false
     /// Local-to-world rotation used only for rendering the rolling ball.
     var orientation = simd_quatf(angle: 0, axis: SIMD3<Float>(0, 0, 1))
@@ -40,15 +39,19 @@ final class Ball {
 
     var speed: CGFloat { (velocity.dx * velocity.dx + velocity.dy * velocity.dy).squareRoot() }
     var isMoving: Bool { speed > 0 }
-    var spinMagnitude: CGFloat { (spin.dx * spin.dx + spin.dy * spin.dy).squareRoot() }
-    var isActive: Bool { isMoving || spinMagnitude > 0 }
+    /// Horizontal spin on a stationary ball is slip that friction will turn into motion, so it keeps the shot alive;
+    /// pure english on a stopped ball does not.
+    var isActive: Bool { isMoving || angularVelocity.x != 0 || angularVelocity.y != 0 }
+    var isSpinning: Bool { simd_length_squared(angularVelocity) > 0 }
 
-    /// Rolls the ball for `dt`: a ball rolling without slipping turns about `z × v / r`; follow/draw slip
-    /// adds to that, and english turns it about the vertical axis.
-    func roll(dt: CGFloat, radius: CGFloat) {
-        let vx = velocity.dx + spin.dx
-        let vy = velocity.dy + spin.dy
-        let omega = SIMD3<Float>(Float(-vy / radius), Float(vx / radius), Float(sideSpin / radius))
+    func stop() {
+        velocity = .zero
+        angularVelocity = .zero
+    }
+
+    /// Turns the rendered orientation by the angular velocity over `dt`.
+    func roll(dt: CGFloat) {
+        let omega = SIMD3<Float>(angularVelocity)
         let rate = simd_length(omega)
         guard rate > 1e-4 else { return }
         let step = simd_quatf(angle: rate * Float(dt), axis: omega / rate)

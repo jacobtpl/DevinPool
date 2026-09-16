@@ -383,16 +383,14 @@ final class GameScene: SKScene {
         let speed = engine.minShotSpeed + (engine.maxShotSpeed - engine.minShotSpeed) * clamped * clamped
         let direction = aimDirection
         let pullback = engine.geometry.ballRadius * (0.6 + clamped * 7)
-        let follow = min(max(spin.y, -1), 1) / GameModel.maxSpinOffset
-        let english = min(max(spin.x, -1), 1) / GameModel.maxSpinOffset
+        let tip = CGPoint(x: min(max(spin.x, -GameModel.maxSpinOffset), GameModel.maxSpinOffset),
+                          y: min(max(spin.y, -GameModel.maxSpinOffset), GameModel.maxSpinOffset))
 
         let strike = SKAction.moveBy(x: direction.dx * pullback, y: direction.dy * pullback, duration: 0.09)
         strike.timingMode = .easeIn
         cueStick.run(.sequence([strike, .run { [weak self] in
             guard let self else { return }
-            cue.velocity = CGVector(dx: direction.dx * speed, dy: direction.dy * speed)
-            cue.spin = CGVector(dx: direction.dx * speed * follow * 1.1, dy: direction.dy * speed * follow * 1.1)
-            cue.sideSpin = speed * english * 0.6
+            engine.strike(cue, direction: direction, speed: speed, tipOffset: tip)
             self.cueStick.isHidden = true
             self.mediumHaptic.impactOccurred(intensity: 0.4 + 0.6 * clamped)
             self.phase = .ballsMoving
@@ -403,6 +401,7 @@ final class GameScene: SKScene {
     private func endShot() {
         guard let geo = geometry else { return }
         let result = rules.resolve(shot: shot, ballsBefore: ballsBeforeShot)
+        for ball in balls { ball.stop() }
 
         if result.respotEight, let eight = balls.first(where: { $0.isEight }) {
             restore(eight, at: freeSpot(near: geo.footSpot, searchUp: true))
@@ -446,7 +445,7 @@ final class GameScene: SKScene {
 
     private func restore(_ ball: Ball, at position: CGPoint) {
         ball.isPocketed = false
-        ball.velocity = .zero
+        ball.stop()
         ball.position = position
         if let node = ballNodes[ball.number], let shadow = shadowNodes[ball.number] {
             node.removeAllActions()
@@ -509,8 +508,8 @@ final class GameScene: SKScene {
 
         if phase == .ballsMoving, let engine {
             let events = engine.step(dt: dt, balls: balls, shot: &shot)
-            for ball in balls where !ball.isPocketed && ball.isActive {
-                ball.roll(dt: dt, radius: engine.geometry.ballRadius)
+            for ball in balls where !ball.isPocketed && ball.isSpinning {
+                ball.roll(dt: dt)
             }
             for ball in events.potted { animatePocket(ball) }
             if events.strongestCollision > engine.geometry.ballRadius * 4, hapticCooldown == 0 {
@@ -561,7 +560,9 @@ final class GameScene: SKScene {
             return
         }
         let r = geo.ballRadius
-        let prediction = engine.predict(from: cue.position, direction: aimDirection, balls: balls)
+        let tip = model?.spin ?? .zero
+        let launch = engine.squirtedDirection(aimDirection, tipOffset: tip)
+        let prediction = engine.predict(from: cue.position, direction: launch, balls: balls)
 
         let path = CGMutablePath()
         path.move(to: cue.position)

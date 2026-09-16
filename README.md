@@ -32,12 +32,29 @@ EightBallPool/
   ContentView.swift           SwiftUI HUD (scoreboard, message banner, power bar, game over)
   Game/
     GameScene.swift           SpriteKit scene: table rendering, input, aim guide, turn flow
-    PhysicsEngine.swift       Custom fixed-step 2D physics (ball/ball, cushions, pockets, aim prediction)
+    PhysicsEngine.swift       Fixed-step (480 Hz) rigid-sphere physics, see below
     EightBallRules.swift      Turn, foul, group assignment and win/loss logic
     GameModel.swift           ObservableObject bridging the scene and SwiftUI
-    Ball.swift                Ball model
-    BallTextures.swift        Procedurally drawn ball textures
+    Ball.swift                Ball model (position, velocity, full angular velocity, render orientation)
+    BallTextures.swift        Sphere-map textures + SpriteKit shader that renders the rolling ball
 ```
+
+## Physics model
+
+A 2.25" ball on a 7 ft table, simulated in the table plane with real coefficients (Marlow; Alciatore):
+
+- **Cue tip**: ω = 5·v·offset / (2r), so a hit 0.4r above centre starts with natural roll; english
+  squirts the cue ball ~3° away from the tip side at maximum offset.
+- **Cloth**: sliding friction μs = 0.20 acts while the contact point slips (stun, stop, follow, draw all
+  come from this), then rolling resistance μr = 0.015; english decays with μsp = 0.044.
+- **Ball–ball**: restitution 0.95 plus surface friction μ = 0.05, which gives cut-induced and
+  english-induced throw and transfers a little english to the object ball. The aim guide includes
+  stun throw.
+- **Cushions**: restitution 0.90, angle-dependent friction (Han 2005) for english kicks and
+  running/reverse rebound angles, and the nose rubs off most top/bottom spin, so a rolling ball
+  slows more off a rail than a stunned one and curves after the rail.
+- **Not modelled**: anything vertical (jumps, masse, cushion nose height), speed-dependent
+  coefficients, follow/draw transfer between balls.
 
 ## Build & run
 
