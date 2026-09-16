@@ -1,4 +1,4 @@
-# 8 Ball Pool (iPhone)
+# Devin Pool — 8 Ball Pool for iPhone
 
 A native two-player 8-ball pool game for iPhone, written in Swift with SwiftUI + SpriteKit.
 No third-party dependencies.
