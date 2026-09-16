@@ -9,4 +9,4 @@ xcodebuild -project EightBallPool.xcodeproj -scheme EightBallPool \
 xcrun simctl boot "$DEVICE" 2>/dev/null || true
 open -a Simulator
 xcrun simctl install booted build/Build/Products/Debug-iphonesimulator/EightBallPool.app
-xcrun simctl launch booted com.jacobtpl.EightBallPool
+xcrun simctl launch booted pool-ios

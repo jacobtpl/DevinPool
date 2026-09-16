@@ -50,3 +50,17 @@ From the command line (booted or auto-booted simulator):
 
 To run on a physical iPhone, select your development team under
 *Signing & Capabilities* in Xcode.
+
+## Upload to App Store Connect / TestFlight (no Xcode UI needed)
+
+Bundle ID `pool-ios`, team `J659DC2DZR`. With an App Store Connect API key (App Manager role):
+
+```
+export ASC_KEY_ID=XXXXXXXXXX ASC_ISSUER_ID=<uuid> ASC_KEY_PATH=~/private_keys/AuthKey_XXXXXXXXXX.p8
+./scripts/upload-appstore.sh            # uses CURRENT_PROJECT_VERSION from the project
+./scripts/upload-appstore.sh 2          # override the build number
+```
+
+The script archives unsigned, then `xcodebuild -exportArchive` signs with a cloud-managed
+distribution certificate and uploads. Each upload needs a unique build number (App Store Connect
+also auto-increments it because `manageAppVersionAndBuildNumber` is enabled).
