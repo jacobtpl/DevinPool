@@ -177,10 +177,12 @@ final class PhysicsEngine {
     let cushionFriction: CGFloat = 0.14
     let cushionNoseHeight: CGFloat = 1.4
 
-    /// Cue: ball-to-shaft-endmass ratio for squirt (TP A.31; ~19 gives 3° at a half-radius offset) and
-    /// ball-to-cue mass ratio (6 oz / 19 oz) for the speed lost to spin on off-centre hits.
+    /// Cue: ball-to-shaft-endmass ratio for squirt (TP A.31; ~19 gives 3° at a half-radius offset),
+    /// ball-to-cue mass ratio (6 oz / 19 oz) and tip-ball collision efficiency (TP A.30; a leather tip's
+    /// COR of ~0.73 loses ~13% of the stroke's energy) for the cue-ball speed a stroke produces.
     let squirtMassRatio: CGFloat = 19
     let ballToCueMass: CGFloat = 6.0 / 19.0
+    let tipEfficiency: CGFloat = 0.87
     /// Beyond this offset a chalked tip (μ ≈ 0.6) slips off the ball: b/R = μ/√(1+μ²) ≈ 0.5.
     static let miscueOffset: CGFloat = 0.5
 
@@ -199,20 +201,28 @@ final class PhysicsEngine {
         stopSpeed = geometry.ballRadius * 0.5
     }
 
-    /// ~9 m/s, a hard break.
-    var maxShotSpeed: CGFloat { geometry.ballRadius * 320 }
-    /// ~0.35 m/s.
+    /// Cue-stick speeds. Max ≈ 8.8 m/s (20 mph), which a centre hit turns into a 25 mph cue ball — a
+    /// professional break. Min ≈ 0.35 m/s.
+    var maxShotSpeed: CGFloat { geometry.ballRadius * 308 }
     var minShotSpeed: CGFloat { geometry.ballRadius * 12 }
 
+    /// Cue-ball speed for a stroke of cue speed `vs` at tip offset `b` (ball radii), TP A.30 eq. 19:
+    /// momentum plus an energy balance with tip efficiency η. A centre hit gives ≈1.27·vs; at the miscue
+    /// limit only ≈0.75·vs, the rest having gone into spin and tip losses.
+    func cueBallSpeed(cueSpeed vs: CGFloat, tipOffset b: CGPoint) -> CGFloat {
+        let q = ballToCueMass + 1 + 2.5 * (b.x * b.x + b.y * b.y)
+        let root = max(0, 1 - (1 - tipEfficiency) * q / ballToCueMass).squareRoot()
+        return vs * (1 + root) / q
+    }
+
     /// State of the cue ball the instant the tip leaves it. `tipOffset` is the strike point in ball radii
-    /// (x right, y up as the shooter sees it) and `speed` is what a centre hit with this stroke would give.
-    /// The tip imparts ω = 5·v·offset / (2r) (a 0.4r high hit starts with natural roll); the energy that
-    /// goes into spin comes out of speed, and side offset squirts the ball away from the tip side.
-    func strike(_ cue: Ball, direction d: CGVector, speed: CGFloat, tipOffset: CGPoint) {
+    /// (x right, y up as the shooter sees it) and `cueSpeed` is the stick speed at impact. The tip imparts
+    /// ω = 5·v·offset / (2r) (a 0.4r high hit starts with natural roll) and side offset squirts the ball
+    /// away from the tip side.
+    func strike(_ cue: Ball, direction d: CGVector, cueSpeed: CGFloat, tipOffset: CGPoint) {
         let r = geometry.ballRadius
         let dir = squirtedDirection(d, tipOffset: tipOffset)
-        let b2 = tipOffset.x * tipOffset.x + tipOffset.y * tipOffset.y
-        let v = speed * (1 + ballToCueMass) / (1 + ballToCueMass * (1 + 2.5 * b2))
+        let v = cueBallSpeed(cueSpeed: cueSpeed, tipOffset: tipOffset)
         cue.velocity = CGVector(dx: dir.dx * v, dy: dir.dy * v)
         let spinRate = 2.5 * v / r
         // Topspin turns about z × dir; right english is counter-clockwise from above.

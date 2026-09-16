@@ -47,12 +47,13 @@ Marlow's *The Physics of Pocket Billiards*, and Mathavan, Jackson & Parkin (Proc
 
 | Effect | Model | Values |
 | --- | --- | --- |
-| Cue tip | ω = 5·v·b / (2r); speed lost to spin via ball/cue mass ratio; squirt per TP A.31 | m_ball/m_cue = 6/19, endmass ratio 19 (→3° at b = 0.5r); tip offset capped at the miscue limit 0.5r |
+| Cue tip | Power bar sets cue-stick speed (0.35–8.8 m/s, i.e. up to a 25 mph break); cue-ball speed from TP A.30 (momentum + energy with tip efficiency η, so a max-offset hit leaves at 0.75·v_cue vs 1.27·v_cue for centre ball); ω = 5·v·b / (2r); squirt per TP A.31 | m_ball/m_cue = 6/19, η = 0.87, endmass ratio 19 (→3° at b = 0.5r); tip offset capped at the miscue limit 0.5r |
 | Cloth | Coulomb sliding friction on the contact-point slip until the ball rolls; rolling resistance; constant spin-down | μs = 0.20, μr = 0.01, english decel 10 rad/s² |
 | Ball–ball | Normal restitution + friction impulse along the 3-D surface slip (cut- and english-induced throw, english and follow/draw transfer); friction falls with rubbing speed (TP A.14 fit to Marlow) | e = 0.95, μ = 0.0100 + 0.108·e^(−1.088·v_rel) |
 | Cushion | Mathavan 2010: impact integrated over normal impulse with friction at the nose (height 7r/5) and at the cloth; compression then restitution of e² of the work | e = 0.98, μ_nose = 0.14, μ_cloth = 0.20 |
 
-Emergent behaviour: stop/stun/follow/draw and the parabolic cue-ball curve after contact, throw
+Emergent behaviour: stop/stun/follow/draw (Dr. Dave's TP B.8 draw example — OB 6 ft away, 11.65 mph cue
+at max offset — draws back 5.5 ft here vs his 6 ft), the parabolic cue-ball curve after contact, throw
 (~2° on a 30° stun cut), a rolling ball rebounding ~5° long and at ~0.6× speed, running english
 lengthening and reverse shortening the rebound, rail-induced english, and rail curve.
 

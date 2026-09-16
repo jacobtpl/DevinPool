@@ -390,7 +390,7 @@ final class GameScene: SKScene {
         strike.timingMode = .easeIn
         cueStick.run(.sequence([strike, .run { [weak self] in
             guard let self else { return }
-            engine.strike(cue, direction: direction, speed: speed, tipOffset: tip)
+            engine.strike(cue, direction: direction, cueSpeed: speed, tipOffset: tip)
             self.cueStick.isHidden = true
             self.mediumHaptic.impactOccurred(intensity: 0.4 + 0.6 * clamped)
             self.phase = .ballsMoving
