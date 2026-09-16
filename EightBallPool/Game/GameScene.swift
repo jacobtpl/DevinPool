@@ -41,6 +41,7 @@ final class GameScene: SKScene {
 
     private var aimDirection = CGVector(dx: 0, dy: 1)
     private var draggingCue = false
+    private var lastAimTouch: CGPoint?
     private var lastUpdate: TimeInterval = 0
 
     private let lightHaptic = UIImpactFeedbackGenerator(style: .light)
@@ -301,7 +302,7 @@ final class GameScene: SKScene {
         createBallNodes(geo)
         buildCueStick(geo)
         phase = .aiming
-        model?.message = "Player 1 to break — drag to aim, pull the power bar to shoot"
+        model?.message = "Player 1 to break — drag to rotate the cue, pull the power bar down to shoot"
         syncModel()
         syncNodes()
     }
@@ -352,24 +353,29 @@ final class GameScene: SKScene {
         return result
     }
 
-    func shoot(power: CGFloat) {
+    func shoot(power: CGFloat, spin: CGPoint = .zero) {
         guard let engine, let cue = cueBall, !cue.isPocketed,
               phase == .aiming || phase == .ballInHand else { return }
         let clamped = min(max(power, 0), 1)
         phase = .shooting
         draggingCue = false
+        lastAimTouch = nil
         ballsBeforeShot = ballsOnTable
         shot = ShotRecord()
 
         let speed = engine.minShotSpeed + (engine.maxShotSpeed - engine.minShotSpeed) * clamped * clamped
         let direction = aimDirection
         let pullback = engine.geometry.ballRadius * (0.6 + clamped * 7)
+        let follow = min(max(spin.y, -1), 1) / GameModel.maxSpinOffset
+        let english = min(max(spin.x, -1), 1) / GameModel.maxSpinOffset
 
         let strike = SKAction.moveBy(x: direction.dx * pullback, y: direction.dy * pullback, duration: 0.09)
         strike.timingMode = .easeIn
         cueStick.run(.sequence([strike, .run { [weak self] in
             guard let self else { return }
             cue.velocity = CGVector(dx: direction.dx * speed, dy: direction.dy * speed)
+            cue.spin = CGVector(dx: direction.dx * speed * follow * 1.1, dy: direction.dy * speed * follow * 1.1)
+            cue.sideSpin = speed * english * 0.6
             self.cueStick.isHidden = true
             self.mediumHaptic.impactOccurred(intensity: 0.4 + 0.6 * clamped)
             self.phase = .ballsMoving
@@ -492,7 +498,7 @@ final class GameScene: SKScene {
                 lightHaptic.impactOccurred(intensity: intensity)
                 hapticCooldown = 0.05
             }
-            if !balls.contains(where: { !$0.isPocketed && $0.isMoving }) {
+            if !balls.contains(where: { !$0.isPocketed && $0.isActive }) {
                 endShot()
             }
         }
@@ -568,10 +574,12 @@ final class GameScene: SKScene {
         if phase != .shooting {
             let power = min(max(model?.power ?? 0, 0), 1)
             let gap = r * (1.6 + power * 7)
+            let english = (model?.spin.x ?? 0) * r * 0.7
+            let right = CGVector(dx: aimDirection.dy, dy: -aimDirection.dx)
             cueStick.isHidden = false
             cueStick.zRotation = atan2(-aimDirection.dy, -aimDirection.dx)
-            cueStick.position = CGPoint(x: cue.position.x - aimDirection.dx * gap,
-                                        y: cue.position.y - aimDirection.dy * gap)
+            cueStick.position = CGPoint(x: cue.position.x - aimDirection.dx * gap + right.dx * english,
+                                        y: cue.position.y - aimDirection.dy * gap + right.dy * english)
         }
     }
 
@@ -585,7 +593,7 @@ final class GameScene: SKScene {
             draggingCue = true
             return
         }
-        updateAim(toward: p)
+        lastAimTouch = p
     }
 
     override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
@@ -593,26 +601,46 @@ final class GameScene: SKScene {
         let p = touch.location(in: self)
         if draggingCue {
             placeCue(at: p)
-        } else {
-            updateAim(toward: p)
+        } else if let last = lastAimTouch {
+            rotateAim(from: last, to: p)
+            lastAimTouch = p
         }
     }
 
     override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
         draggingCue = false
+        lastAimTouch = nil
     }
 
     override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
         draggingCue = false
+        lastAimTouch = nil
     }
 
-    private func updateAim(toward p: CGPoint) {
+    /// Rotates the aim by the angle the finger sweeps around the cue ball, so touching down never
+    /// snaps the cue. Close to the ball the sweep angle is ill-defined, so the drag is treated as a
+    /// sideways swipe instead; the two blend so there is no discontinuity.
+    private func rotateAim(from a: CGPoint, to b: CGPoint) {
         guard let cue = cueBall, let geo = geometry else { return }
-        let dx = p.x - cue.position.x
-        let dy = p.y - cue.position.y
-        let len = hypot(dx, dy)
-        guard len > geo.ballRadius * 0.5 else { return }
-        aimDirection = CGVector(dx: dx / len, dy: dy / len)
+        let r = geo.ballRadius
+        let ax = a.x - cue.position.x, ay = a.y - cue.position.y
+        let bx = b.x - cue.position.x, by = b.y - cue.position.y
+        let distance = max(hypot(bx, by), 0.001)
+
+        var sweep = atan2(by, bx) - atan2(ay, ax)
+        if sweep > .pi { sweep -= 2 * .pi } else if sweep < -.pi { sweep += 2 * .pi }
+
+        // Sideways swipe relative to the current aim: a full swipe across the table turns ~90°.
+        let right = CGVector(dx: aimDirection.dy, dy: -aimDirection.dx)
+        let lateral = (b.x - a.x) * right.dx + (b.y - a.y) * right.dy
+        let swipe = -lateral / geo.felt.width * (.pi / 2)
+
+        let near = r * 3, far = r * 9
+        let blend = min(max((distance - near) / (far - near), 0), 1)
+        let delta = sweep * blend + swipe * (1 - blend)
+
+        let current = atan2(aimDirection.dy, aimDirection.dx) + delta
+        aimDirection = CGVector(dx: cos(current), dy: sin(current))
     }
 
     private func placeCue(at p: CGPoint) {

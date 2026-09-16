@@ -13,6 +13,10 @@ final class Ball {
     let number: Int
     var position: CGPoint
     var velocity: CGVector = .zero
+    /// Follow/draw: surface slip velocity relative to the cloth (speed units). Friction converts it into velocity.
+    var spin: CGVector = .zero
+    /// English: rim speed about the vertical axis (speed units); positive is counter-clockwise from above.
+    var sideSpin: CGFloat = 0
     var isPocketed = false
 
     init(number: Int, position: CGPoint) {
@@ -33,6 +37,8 @@ final class Ball {
 
     var speed: CGFloat { (velocity.dx * velocity.dx + velocity.dy * velocity.dy).squareRoot() }
     var isMoving: Bool { speed > 0 }
+    var spinMagnitude: CGFloat { (spin.dx * spin.dx + spin.dy * spin.dy).squareRoot() }
+    var isActive: Bool { isMoving || spinMagnitude > 0 }
 }
 
 func groupOf(_ number: Int) -> BallGroup? {

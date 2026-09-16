@@ -26,7 +26,11 @@ final class GameModel: ObservableObject {
     ]
     @Published var message = "Player 1 to break"
     @Published var power: CGFloat = 0
+    /// Cue-tip offset on the cue ball as seen from behind the cue: x = english (right positive), y = follow (+) / draw (-).
+    @Published var spin: CGPoint = .zero
     @Published var isOpenTable = true
+
+    static let maxSpinOffset: CGFloat = 0.8
 
     var canShoot: Bool { phase == .aiming || phase == .ballInHand }
 
@@ -47,12 +51,20 @@ final class GameModel: ObservableObject {
             power = 0
             return
         }
-        scene.shoot(power: power)
+        scene.shoot(power: power, spin: spin)
         power = 0
+        spin = .zero
+    }
+
+    func setSpin(_ offset: CGPoint) {
+        let len = hypot(offset.x, offset.y)
+        let limit = Self.maxSpinOffset
+        spin = len > limit ? CGPoint(x: offset.x / len * limit, y: offset.y / len * limit) : offset
     }
 
     func newGame() {
         power = 0
+        spin = .zero
         scene.newGame()
     }
 }

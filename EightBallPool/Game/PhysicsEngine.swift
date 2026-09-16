@@ -79,6 +79,13 @@ final class PhysicsEngine {
     private let damping: CGFloat = 0.38
     private let stopSpeed: CGFloat
 
+    /// Rate (1/s) at which cloth friction removes slip; the ball picks up `spinTransfer` of the removed slip as velocity.
+    private let spinFriction: CGFloat = 3.0
+    private let spinTransfer: CGFloat = 0.35
+    private let sideSpinDecay: CGFloat = 0.5
+    private let cushionSideSpinKick: CGFloat = 0.55
+    private let cushionSideSpinRetained: CGFloat = 0.5
+
     init(geometry: TableGeometry) {
         self.geometry = geometry
         rollingDeceleration = geometry.ballRadius * 5.0
@@ -103,14 +110,34 @@ final class PhysicsEngine {
     }
 
     private func integrate(_ h: CGFloat, balls: [Ball]) {
-        for b in balls where !b.isPocketed && b.isMoving {
-            let speed = b.speed
+        for b in balls where !b.isPocketed && b.isActive {
             b.position.x += b.velocity.dx * h
             b.position.y += b.velocity.dy * h
 
+            if b.sideSpin != 0 {
+                b.sideSpin *= max(0, 1 - sideSpinDecay * h)
+                if abs(b.sideSpin) < stopSpeed * 0.1 { b.sideSpin = 0 }
+            }
+
+            var spinMag = b.spinMagnitude
+            if spinMag > 0 {
+                let removed = min(1, spinFriction * h)
+                b.velocity.dx += b.spin.dx * removed * spinTransfer
+                b.velocity.dy += b.spin.dy * removed * spinTransfer
+                b.spin.dx *= 1 - removed
+                b.spin.dy *= 1 - removed
+                spinMag = b.spinMagnitude
+                if spinMag < stopSpeed * 0.2 {
+                    b.spin = .zero
+                    spinMag = 0
+                }
+            }
+
+            let speed = b.speed
+            guard speed > 0 else { continue }
             let newSpeed = speed - (rollingDeceleration + speed * damping) * h
             if newSpeed <= stopSpeed {
-                b.velocity = .zero
+                if spinMag == 0 { b.velocity = .zero }
                 continue
             }
             let scale = newSpeed / speed
@@ -167,22 +194,43 @@ final class PhysicsEngine {
             if !geometry.isMouthOnLongRail(y: b.position.y) {
                 if b.position.x - r < felt.minX {
                     b.position.x = felt.minX + r
-                    if b.velocity.dx < 0 { b.velocity.dx = -b.velocity.dx * cushionRestitution }
+                    if b.velocity.dx < 0 {
+                        b.velocity.dx = -b.velocity.dx * cushionRestitution
+                        applySideSpin(to: b, normal: CGVector(dx: 1, dy: 0))
+                    }
                 } else if b.position.x + r > felt.maxX {
                     b.position.x = felt.maxX - r
-                    if b.velocity.dx > 0 { b.velocity.dx = -b.velocity.dx * cushionRestitution }
+                    if b.velocity.dx > 0 {
+                        b.velocity.dx = -b.velocity.dx * cushionRestitution
+                        applySideSpin(to: b, normal: CGVector(dx: -1, dy: 0))
+                    }
                 }
             }
             if !geometry.isMouthOnShortRail(x: b.position.x) {
                 if b.position.y - r < felt.minY {
                     b.position.y = felt.minY + r
-                    if b.velocity.dy < 0 { b.velocity.dy = -b.velocity.dy * cushionRestitution }
+                    if b.velocity.dy < 0 {
+                        b.velocity.dy = -b.velocity.dy * cushionRestitution
+                        applySideSpin(to: b, normal: CGVector(dx: 0, dy: 1))
+                    }
                 } else if b.position.y + r > felt.maxY {
                     b.position.y = felt.maxY - r
-                    if b.velocity.dy > 0 { b.velocity.dy = -b.velocity.dy * cushionRestitution }
+                    if b.velocity.dy > 0 {
+                        b.velocity.dy = -b.velocity.dy * cushionRestitution
+                        applySideSpin(to: b, normal: CGVector(dx: 0, dy: -1))
+                    }
                 }
             }
         }
+    }
+
+    /// English grips the cushion: friction on the spinning rim kicks the ball along the rail (`n` points into the table).
+    private func applySideSpin(to b: Ball, normal n: CGVector) {
+        guard b.sideSpin != 0 else { return }
+        let kick = b.sideSpin * cushionSideSpinKick
+        b.velocity.dx += -n.dy * kick
+        b.velocity.dy += n.dx * kick
+        b.sideSpin *= cushionSideSpinRetained
     }
 
     private func detectPockets(balls: [Ball], shot: inout ShotRecord, events: inout StepEvents) {
@@ -219,6 +267,8 @@ final class PhysicsEngine {
                 b.position = pocket
                 b.isPocketed = true
                 b.velocity = .zero
+                b.spin = .zero
+                b.sideSpin = 0
                 shot.potted.append(b.number)
                 events.potted.append(b)
             }

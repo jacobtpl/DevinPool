@@ -5,10 +5,12 @@ No third-party dependencies.
 
 ## Play
 
-- **Aim**: drag anywhere on the table — the cue points from the cue ball toward your finger.
-  A guide line shows the cue ball path, the ghost ball at contact, the object ball's direction
-  and the cue ball's deflection.
-- **Shoot**: pull the power bar at the bottom to the right and release.
+- **Aim**: drag anywhere on the table — the cue rotates with your finger (touching down never
+  snaps it). A guide line shows the cue ball path, the ghost ball at contact, the object ball's
+  direction and the cue ball's deflection.
+- **Spin**: drag the red dot on the cue-ball diagram (bottom right). Top = follow, bottom = draw,
+  left/right = english (kicks off cushions). Double-tap to reset.
+- **Shoot**: pull the power bar on the right side down and release.
 - **Ball in hand** (after a foul): drag the cue ball anywhere on the table, then aim and shoot.
 - **New game**: the circular arrow button.
 

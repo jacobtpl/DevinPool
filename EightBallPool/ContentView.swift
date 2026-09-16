@@ -5,7 +5,8 @@ struct ContentView: View {
     @StateObject private var model = GameModel()
 
     private let topHUDHeight: CGFloat = 82
-    private let bottomHUDHeight: CGFloat = 62
+    private let bottomHUDHeight: CGFloat = 66
+    private let powerBarWidth: CGFloat = 40
 
     var body: some View {
         GeometryReader { geo in
@@ -24,7 +25,13 @@ struct ContentView: View {
                     .padding(.top, 4)
                     .frame(height: topHUDHeight, alignment: .top)
 
-                    Spacer(minLength: 0)
+                    HStack(spacing: 0) {
+                        Spacer(minLength: 0)
+                        PowerBar(model: model)
+                            .frame(width: powerBarWidth)
+                            .padding(.vertical, 24)
+                            .padding(.trailing, 8)
+                    }
 
                     ControlsView(model: model)
                         .padding(.horizontal, 14)
@@ -46,7 +53,7 @@ struct ContentView: View {
             top: geo.safeAreaInsets.top + topHUDHeight + 4,
             left: 10,
             bottom: geo.safeAreaInsets.bottom + bottomHUDHeight + 6,
-            right: 10
+            right: 8 + powerBarWidth + 8
         )
     }
 }
@@ -156,7 +163,7 @@ private struct MessageBanner: View {
     private var displayText: String {
         switch phase {
         case .ballsMoving, .shooting: return ""
-        case .ballInHand: return text.isEmpty ? "Ball in hand: drag the cue ball" : text
+        case .ballInHand: return text.isEmpty ? "Ball in hand: drag the cue ball to place it" : text
         default: return text
         }
     }
@@ -168,7 +175,7 @@ private struct ControlsView: View {
     @ObservedObject var model: GameModel
 
     var body: some View {
-        HStack(alignment: .center, spacing: 12) {
+        HStack(alignment: .center, spacing: 14) {
             Button {
                 model.newGame()
             } label: {
@@ -180,40 +187,112 @@ private struct ControlsView: View {
             .buttonStyle(.plain)
             .accessibilityLabel("New game")
 
-            PowerBar(model: model)
+            Spacer(minLength: 0)
+
+            VStack(spacing: 2) {
+                Text(spinLabel)
+                    .font(.system(.caption2, design: .rounded, weight: .bold))
+                    .foregroundStyle(.white.opacity(0.7))
+                    .lineLimit(1)
+                Text(model.power > 0.05 ? "Release to shoot" : "Pull the bar down to set power")
+                    .font(.system(.caption2, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.45))
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 0)
+
+            SpinControl(model: model)
         }
+    }
+
+    private var spinLabel: String {
+        let s = model.spin
+        if hypot(s.x, s.y) < 0.08 { return "Spin: none" }
+        var parts: [String] = []
+        if s.y > 0.15 { parts.append("top") } else if s.y < -0.15 { parts.append("back") }
+        if s.x > 0.15 { parts.append("right") } else if s.x < -0.15 { parts.append("left") }
+        return "Spin: " + parts.joined(separator: " + ")
     }
 }
 
+/// Cue-ball diagram: drag the red dot to choose where the tip strikes the ball.
+private struct SpinControl: View {
+    @ObservedObject var model: GameModel
+
+    private let diameter: CGFloat = 56
+
+    var body: some View {
+        let radius = diameter / 2
+        let dotOffset = CGSize(width: model.spin.x * radius, height: -model.spin.y * radius)
+        ZStack {
+            Circle()
+                .fill(
+                    RadialGradient(colors: [Color.white, Color(white: 0.78)],
+                                   center: .init(x: 0.38, y: 0.32), startRadius: 2, endRadius: radius)
+                )
+            Circle()
+                .strokeBorder(Color.white.opacity(0.25), lineWidth: 1)
+            Path { p in
+                p.move(to: CGPoint(x: radius, y: 6))
+                p.addLine(to: CGPoint(x: radius, y: diameter - 6))
+                p.move(to: CGPoint(x: 6, y: radius))
+                p.addLine(to: CGPoint(x: diameter - 6, y: radius))
+            }
+            .stroke(Color.black.opacity(0.12), lineWidth: 1)
+            Circle()
+                .fill(Color.red)
+                .frame(width: 11, height: 11)
+                .shadow(color: .black.opacity(0.35), radius: 1, y: 1)
+                .offset(dotOffset)
+        }
+        .frame(width: diameter, height: diameter)
+        .opacity(model.canShoot ? 1 : 0.4)
+        .contentShape(Circle().inset(by: -8))
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { value in
+                    guard model.canShoot else { return }
+                    let x = (value.location.x - radius) / radius
+                    let y = -(value.location.y - radius) / radius
+                    model.setSpin(CGPoint(x: x, y: y))
+                }
+        )
+        .simultaneousGesture(TapGesture(count: 2).onEnded { model.setSpin(.zero) })
+        .accessibilityLabel("Spin")
+        .animation(.easeOut(duration: 0.08), value: model.spin)
+    }
+}
+
+/// Vertical power bar: pull down to load the shot, release to strike.
 private struct PowerBar: View {
     @ObservedObject var model: GameModel
 
     var body: some View {
         GeometryReader { geo in
-            let width = geo.size.width
-            ZStack(alignment: .leading) {
+            let height = geo.size.height
+            ZStack(alignment: .top) {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .fill(Color.white.opacity(0.10))
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .fill(
                         LinearGradient(colors: [.green, .yellow, .orange, .red],
-                                       startPoint: .leading, endPoint: .trailing)
+                                       startPoint: .top, endPoint: .bottom)
                     )
-                    .frame(width: max(0, width * model.power))
+                    .frame(height: max(0, height * model.power))
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .strokeBorder(Color.white.opacity(model.canShoot ? 0.35 : 0.1), lineWidth: 1.5)
-                HStack(spacing: 6) {
-                    Image(systemName: "chevron.right.2")
+                VStack {
+                    Image(systemName: "chevron.down.2")
                         .font(.system(size: 12, weight: .bold))
-                    Text(model.power > 0.05 ? "Release to shoot" : "Pull right to set power")
-                        .font(.system(.caption, design: .rounded, weight: .bold))
+                        .padding(.top, 10)
                     Spacer()
-                    Text("\(Int(model.power * 100))%")
-                        .font(.system(.caption, design: .rounded, weight: .heavy))
+                    Text("\(Int(model.power * 100))")
+                        .font(.system(.caption2, design: .rounded, weight: .heavy))
                         .monospacedDigit()
                         .opacity(model.power > 0.05 ? 1 : 0)
+                        .padding(.bottom, 8)
                 }
-                .padding(.horizontal, 12)
                 .foregroundStyle(.white.opacity(0.85))
             }
             .opacity(model.canShoot ? 1 : 0.4)
@@ -222,14 +301,13 @@ private struct PowerBar: View {
                 DragGesture(minimumDistance: 0)
                     .onChanged { value in
                         guard model.canShoot else { return }
-                        model.power = min(max(value.translation.width / (width * 0.85), 0), 1)
+                        model.power = min(max(value.translation.height / (height * 0.85), 0), 1)
                     }
                     .onEnded { _ in
                         model.shoot()
                     }
             )
         }
-        .frame(height: 44)
     }
 }
 
