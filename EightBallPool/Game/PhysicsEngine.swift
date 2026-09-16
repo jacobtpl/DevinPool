@@ -137,41 +137,52 @@ struct StepEvents {
     var strongestCollision: CGFloat = 0
 }
 
-/// Rigid-sphere billiard physics in the table plane. Each ball carries a full angular velocity, and every
-/// force is a Coulomb friction impulse acting through the contact point, so follow/draw/english, the
-/// slide-to-roll transition, throw and cushion running/reverse english all fall out of a handful of
-/// measured coefficients (Marlow, *The Physics of Pocket Billiards*; Alciatore, billiards.colostate.edu).
+/// Rigid-sphere billiard physics in the table plane. Each ball carries a full angular velocity and every
+/// interaction is a Coulomb friction impulse through the contact point, so follow/draw/english, the
+/// slide-to-roll transition, throw, spin transfer and cushion running/reverse english all fall out of
+/// measured coefficients rather than tuning knobs. Sources:
+///   - D. Alciatore, billiards.colostate.edu — physical-property constants (FAQ), TP A.14 (throw and the
+///     speed-dependent ball-ball friction fit), TP A.31 / B.1 (squirt), TP B.2 (rolling and spin resistance).
+///   - Mathavan, Jackson & Parkin, "A theoretical analysis of billiard ball dynamics under cushion
+///     impacts", Proc. IMechE C 224 (2010) — the ball-cushion impact model and its fitted coefficients.
+///   - W. Marlow, *The Physics of Pocket Billiards* (1995) — ball-ball friction data behind the A.14 fit.
 ///
-/// Not modelled: the vertical dimension (jumps, masse curve, the cushion nose being above centre),
-/// speed dependence of the coefficients, and ball-ball spin transfer of follow/draw (a few percent).
+/// Not modelled: the ball leaving the cloth (jumps, hops off a hard cushion hit), masse/swerve from cue
+/// elevation, cushion deformation above ~2.5 m/s normal speed, and the tiny cloth "ball turn".
 final class PhysicsEngine {
     let geometry: TableGeometry
 
     let substep: CGFloat = 1.0 / 480.0
 
-    /// A 2.25" ball (radius 28.575 mm); everything else is derived from it.
+    /// A 2.25" ball (radius 28.575 mm, 6 oz); everything else is derived from it.
     static let realBallRadius: CGFloat = 0.028575
 
-    /// Cloth: kinetic friction while the contact point slips, rolling resistance once it grips,
-    /// and the friction that slows a ball spinning in place.
+    /// Cloth (Alciatore FAQ ranges: sliding 0.15–0.4, rolling 0.005–0.015, spin-down 5–15 rad/s²).
     let slidingFriction: CGFloat = 0.20
-    let rollingFriction: CGFloat = 0.015
-    let spinningFriction: CGFloat = 0.044
+    let rollingFriction: CGFloat = 0.01
+    /// Deceleration of a ball spinning in place, rad/s² (TP B.2 spin-down measurements).
+    let spinDeceleration: CGFloat = 10
 
-    /// Ball-ball: phenolic resin restitution and the small surface friction that produces throw.
+    /// Ball-ball restitution (FAQ 0.92–0.98). Friction follows Alciatore's fit to Marlow's data
+    /// (TP A.14): μ = 0.009951 + 0.108·e^(−1.088·v_rel), v_rel in m/s — slow rubbing grips harder.
     let ballRestitution: CGFloat = 0.95
-    let ballFriction: CGFloat = 0.05
+    func ballFriction(relativeSurfaceSpeed v: CGFloat) -> CGFloat {
+        0.009951 + 0.108 * exp(-1.088 * v * PhysicsEngine.realBallRadius / geometry.ballRadius)
+    }
 
-    /// Cushion: rubber restitution, the share of top/bottom spin the nose rubs off because it grips the
-    /// ball above centre, and ball-rubber friction, which falls off with the angle of incidence
-    /// (Han 2005, μ = 0.471 − 0.241·θ): glancing hits grip less than square ones.
-    let cushionRestitution: CGFloat = 0.90
-    let cushionSpinRetained: CGFloat = 0.1
-    func cushionFriction(incidence theta: CGFloat) -> CGFloat { max(0.471 - 0.241 * theta, 0.1) }
+    /// Cushion (Mathavan 2010 model and its fitted values): rubber restitution 0.98 and ball-rubber
+    /// friction 0.14, with the nose gripping the ball at height 7R/5. Most of the speed a rebound
+    /// loses comes from friction at the nose and the cloth, not from the rubber.
+    let cushionRestitution: CGFloat = 0.98
+    let cushionFriction: CGFloat = 0.14
+    let cushionNoseHeight: CGFloat = 1.4
 
-    /// Cue-ball deflection away from the side of the tip offset, radians per ball radius of offset
-    /// (a low-deflection cue gives ~2.5-3° at the usual maximum offset).
-    let squirtPerOffset: CGFloat = 4.0 * .pi / 180
+    /// Cue: ball-to-shaft-endmass ratio for squirt (TP A.31; ~19 gives 3° at a half-radius offset) and
+    /// ball-to-cue mass ratio (6 oz / 19 oz) for the speed lost to spin on off-centre hits.
+    let squirtMassRatio: CGFloat = 19
+    let ballToCueMass: CGFloat = 6.0 / 19.0
+    /// Beyond this offset a chalked tip (μ ≈ 0.6) slips off the ball: b/R = μ/√(1+μ²) ≈ 0.5.
+    static let miscueOffset: CGFloat = 0.5
 
     /// Gravity in table units per second squared.
     let gravity: CGFloat
@@ -194,13 +205,16 @@ final class PhysicsEngine {
     var minShotSpeed: CGFloat { geometry.ballRadius * 12 }
 
     /// State of the cue ball the instant the tip leaves it. `tipOffset` is the strike point in ball radii
-    /// (x right, y up as the shooter sees it): the tip imparts ω = 5·v·offset / (2r), so a 0.4r high hit
-    /// starts with natural roll, and english squirts the ball a few degrees away from the tip side.
+    /// (x right, y up as the shooter sees it) and `speed` is what a centre hit with this stroke would give.
+    /// The tip imparts ω = 5·v·offset / (2r) (a 0.4r high hit starts with natural roll); the energy that
+    /// goes into spin comes out of speed, and side offset squirts the ball away from the tip side.
     func strike(_ cue: Ball, direction d: CGVector, speed: CGFloat, tipOffset: CGPoint) {
         let r = geometry.ballRadius
         let dir = squirtedDirection(d, tipOffset: tipOffset)
-        cue.velocity = CGVector(dx: dir.dx * speed, dy: dir.dy * speed)
-        let spinRate = 2.5 * speed / r
+        let b2 = tipOffset.x * tipOffset.x + tipOffset.y * tipOffset.y
+        let v = speed * (1 + ballToCueMass) / (1 + ballToCueMass * (1 + 2.5 * b2))
+        cue.velocity = CGVector(dx: dir.dx * v, dy: dir.dy * v)
+        let spinRate = 2.5 * v / r
         // Topspin turns about z × dir; right english is counter-clockwise from above.
         cue.angularVelocity = SIMD3<Double>(
             Double(-dir.dy * spinRate * tipOffset.y),
@@ -209,9 +223,16 @@ final class PhysicsEngine {
         )
     }
 
+    /// Squirt (TP A.31 eq. 13): the tip grips the ball, so the sideways reaction of the shaft's endmass
+    /// pushes the ball off line by tan α = (5/2)·b·√(1−b²) / (1 + m_r + (5/2)·b²), b in ball radii.
+    func squirtAngle(tipOffset: CGPoint) -> CGFloat {
+        let b = min(max(tipOffset.x, -1), 1)
+        return atan(2.5 * b * (1 - b * b).squareRoot() / (1 + squirtMassRatio + 2.5 * b * b))
+    }
+
     /// Direction the cue ball actually leaves the tip in, for the aim guide.
     func squirtedDirection(_ d: CGVector, tipOffset: CGPoint) -> CGVector {
-        let squirt = tipOffset.x * squirtPerOffset
+        let squirt = squirtAngle(tipOffset: tipOffset)
         return CGVector(dx: d.dx * cos(squirt) - d.dy * sin(squirt),
                         dy: d.dx * sin(squirt) + d.dy * cos(squirt))
     }
@@ -233,12 +254,12 @@ final class PhysicsEngine {
     /// Cloth contact. The contact point slips at u = v − r(ω × ẑ); while it does, friction μs·g acts on
     /// the centre against u and its torque spins the ball up, so u shrinks at 7/2·μs·g along a fixed
     /// line (the classic result behind stun, stop, follow and draw). Once u = 0 the ball rolls, held
-    /// there by ω = ẑ × v / r and slowed only by rolling resistance. English decays at 5/2·μsp·g/r.
+    /// there by ω = ẑ × v / r and slowed only by rolling resistance. English decays at a constant rate.
     private func integrate(_ h: CGFloat, balls: [Ball]) {
         let r = geometry.ballRadius
         let g = gravity
         let slipDecel = 3.5 * slidingFriction * g
-        let spinDecel = 2.5 * spinningFriction * g / r
+        let spinDecel = spinDeceleration
 
         for b in balls where !b.isPocketed && (b.isSpinning || b.isMoving) {
             var wx = CGFloat(b.angularVelocity.x)
@@ -322,21 +343,28 @@ final class PhysicsEngine {
                 b.velocity.dx += nx * impulse
                 b.velocity.dy += ny * impulse
 
-                // Throw: the surfaces rub sideways by the tangential relative velocity plus both balls'
-                // english. Friction (capped at μ·Jn) pushes the object ball off the line of centres and
-                // swaps a little english between the balls. A unit tangential impulse changes the
-                // surface slip by 7/m (1/m each for translation, 5/2m each for rotation).
+                // Throw (TP A.14): the contact patches rub with relative velocity u = Δv − r(ωa+ωb)×n,
+                // whose in-plane part comes from the cut angle and both balls' english and whose vertical
+                // part comes from follow/draw. Friction acts along −u, capped at μ(|u|)·Jn or the impulse
+                // that stops the rubbing (|u|/7: 1/m each for translation, 5/2m each for rotation). The
+                // in-plane part throws the object ball and swaps english; the vertical part trades
+                // follow/draw between the balls.
                 let tx = -ny, ty = nx
-                let slip = rvx * tx + rvy * ty - r * CGFloat(a.angularVelocity.z + b.angularVelocity.z)
-                if slip != 0 {
-                    let jt = min(ballFriction * impulse, abs(slip) / 7) * (slip < 0 ? -1 : 1)
+                let wa = a.angularVelocity, wb = b.angularVelocity
+                let ut = rvx * tx + rvy * ty - r * CGFloat(wa.z + wb.z)
+                let uz = -r * (CGFloat(wa.x + wb.x) * ny - CGFloat(wa.y + wb.y) * nx)
+                let slip = hypot(ut, uz)
+                if slip > 0 {
+                    let j = min(ballFriction(relativeSurfaceSpeed: slip) * impulse, slip / 7)
+                    let jt = j * ut / slip, jz = j * uz / slip
                     a.velocity.dx += tx * jt
                     a.velocity.dy += ty * jt
                     b.velocity.dx -= tx * jt
                     b.velocity.dy -= ty * jt
-                    let dwz = Double(2.5 * jt / r)
-                    a.angularVelocity.z += dwz
-                    b.angularVelocity.z += dwz
+                    let k = 2.5 / r
+                    let dw = SIMD3<Double>(Double(k * jz * ny), Double(-k * jz * nx), Double(k * jt))
+                    a.angularVelocity += dw
+                    b.angularVelocity += dw
                 }
 
                 events.strongestCollision = max(events.strongestCollision, -relNormal)
@@ -378,35 +406,73 @@ final class PhysicsEngine {
         }
     }
 
-    /// Cushion impact (`n` points into the table). Normal restitution, then cloth-on-rubber friction
-    /// against the rim's tangential slip v·t − r·ωz (capped at μ·Jn): english kicks the ball along the
-    /// rail and shortens or lengthens the rebound angle. The nose also rubs off most of the ball's
-    /// top/bottom spin about the rail axis; whatever roll survives is now against the new direction of
-    /// travel, so the ball slides and loses more speed on the cloth, which is why a rolling ball
-    /// rebounds slower than a stunned one and a drawn ball comes off fast.
+    /// Cushion impact, Mathavan, Jackson & Parkin (2010). The nose touches the ball at height 7R/5,
+    /// so the contact normal is tilted θ = asin(2/5) above horizontal, and the impact is integrated
+    /// over the normal impulse P rather than time: at each increment Coulomb friction acts at the nose
+    /// (μw, against the slip there) and at the cloth (μs, against the slip there, driven by the
+    /// downward component of the nose force). Compression runs until the normal velocity is gone;
+    /// restitution returns e² of the compression work. This reproduces the measured rebound speeds
+    /// and angles for stun, rolling, running and reverse english, and the rail-induced english.
+    /// Frame (paper's): ŷ into the cushion (= −`n`), x̂ = ŷ × ẑ along the rail, ẑ up.
     private func bounce(_ b: Ball, normal n: CGVector, normalSpeed vn: CGFloat) {
         let r = geometry.ballRadius
-        let jn = -(1 + cushionRestitution) * vn
-        b.velocity.dx += n.dx * jn
-        b.velocity.dy += n.dy * jn
+        let sinT = cushionNoseHeight - 1
+        let cosT = (1 - sinT * sinT).squareRoot()
+        let xh = CGVector(dx: -n.dy, dy: n.dx)
+        let yh = CGVector(dx: -n.dx, dy: -n.dy)
+        let muW = cushionFriction, muS = slidingFriction
 
-        let tx = -n.dy, ty = n.dx
-        let vt = b.velocity.dx * tx + b.velocity.dy * ty
-        let wz = CGFloat(b.angularVelocity.z)
-        let slip = vt - r * wz
-        if slip != 0 {
-            let mu = cushionFriction(incidence: atan2(abs(vt), -vn))
-            let jt = -min(mu * jn, abs(slip) * 2 / 7) * (slip < 0 ? -1 : 1)
-            b.velocity.dx += tx * jt
-            b.velocity.dy += ty * jt
-            b.angularVelocity.z = Double(wz - 2.5 * jt / r)
+        var vx = b.velocity.dx * xh.dx + b.velocity.dy * xh.dy
+        var vy = -vn
+        let w = b.angularVelocity
+        var wx = CGFloat(w.x) * xh.dx + CGFloat(w.y) * xh.dy
+        var wy = CGFloat(w.x) * yh.dx + CGFloat(w.y) * yh.dy
+        var wz = CGFloat(w.z)
+
+        let k = 2.5 / r
+        func advance(_ dP: CGFloat) -> CGFloat {
+            // Slip at the nose (I) and at the cloth (C); friction opposes each.
+            let vxI = vx + wy * r * sinT - wz * r * cosT
+            let vyI = -vy * sinT + wx * r
+            let vxC = vx - wy * r
+            let vyC = vy + wx * r
+            let sI = hypot(vxI, vyI), sC = hypot(vxC, vyC)
+            let cI = sI > 0 ? vxI / sI : 0, sinI = sI > 0 ? vyI / sI : 0
+            let cC = sC > 0 ? vxC / sC : 0, sinC = sC > 0 ? vyC / sC : 0
+            // Normal force at the cloth that the tilted nose force presses down with.
+            let cloth = sinT + muW * sinI * cosT
+            vx -= (muW * cI + muS * cC * cloth) * dP
+            vy -= (cosT - muW * sinT * sinI + muS * sinC * cloth) * dP
+            wx -= k * (muW * sinI + muS * sinC * cloth) * dP
+            wy -= k * (muW * cI * sinT - muS * cC * cloth) * dP
+            wz += k * (muW * cI * cosT) * dP
+            return dP * abs(vy) * cosT
         }
 
-        let wx = CGFloat(b.angularVelocity.x), wy = CGFloat(b.angularVelocity.y)
-        let alongRail = wx * tx + wy * ty
-        let kept = alongRail * cushionSpinRetained
-        b.angularVelocity.x = Double(wx - alongRail * tx + kept * tx)
-        b.angularVelocity.y = Double(wy - alongRail * ty + kept * ty)
+        let steps = 400
+        var work: CGFloat = 0
+        let dP = vy / CGFloat(steps)
+        var guardCount = 0
+        while vy > 0, guardCount < steps * 4 {
+            work += advance(dP)
+            guardCount += 1
+        }
+        let target = cushionRestitution * cushionRestitution * work
+        var returned: CGFloat = 0
+        guardCount = 0
+        while returned < target, guardCount < steps * 4 {
+            let remaining = target - returned
+            let stepWork = dP * max(abs(vy), 1e-9) * cosT
+            returned += advance(stepWork > remaining ? dP * remaining / stepWork : dP)
+            guardCount += 1
+        }
+
+        b.velocity = CGVector(dx: vx * xh.dx + vy * yh.dx, dy: vx * xh.dy + vy * yh.dy)
+        b.angularVelocity = SIMD3<Double>(
+            Double(wx * xh.dx + wy * yh.dx),
+            Double(wx * xh.dy + wy * yh.dy),
+            Double(wz)
+        )
     }
 
     private func detectPockets(balls: [Ball], shot: inout ShotRecord, events: inout StepEvents) {
@@ -481,13 +547,15 @@ final class PhysicsEngine {
             let ny = hit.position.y - end.y
             let len = max(hypot(nx, ny), 0.0001)
             let n = CGVector(dx: nx / len, dy: ny / len)
-            // Same impulses as `resolveBallCollisions` for a unit-speed stun cue ball, so the guide
-            // includes cut-induced throw (english and speed effects are left to the player).
+            // Same impulses as `resolveBallCollisions` for a stun cue ball at a typical 1.5 m/s, so the
+            // guide includes cut-induced throw (english and speed effects are left to the player).
             let dot = dx * n.dx + dy * n.dy
             let tx = -n.dy, ty = n.dx
             let impulse = (1 + ballRestitution) * dot * 0.5
             let slip = -(dx * tx + dy * ty)
-            let jt = min(ballFriction * impulse, abs(slip) / 7) * (slip < 0 ? -1 : 1)
+            let typicalSpeed = 1.5 * geometry.ballRadius / PhysicsEngine.realBallRadius
+            let mu = ballFriction(relativeSurfaceSpeed: abs(slip) * typicalSpeed)
+            let jt = min(mu * impulse, abs(slip) / 7) * (slip < 0 ? -1 : 1)
             let ox = n.dx * impulse - tx * jt, oy = n.dy * impulse - ty * jt
             let ol = max(hypot(ox, oy), 0.0001)
             prediction.objectDirection = CGVector(dx: ox / ol, dy: oy / ol)

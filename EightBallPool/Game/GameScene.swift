@@ -598,7 +598,7 @@ final class GameScene: SKScene {
         if phase != .shooting {
             let power = min(max(model?.power ?? 0, 0), 1)
             let gap = r * (1.6 + power * 7)
-            let english = (model?.spin.x ?? 0) * r * 0.7
+            let english = (model?.spin.x ?? 0) * r
             let right = CGVector(dx: aimDirection.dy, dy: -aimDirection.dx)
             cueStick.isHidden = false
             cueStick.zRotation = atan2(-aimDirection.dy, -aimDirection.dx)

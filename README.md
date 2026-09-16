@@ -41,20 +41,24 @@ EightBallPool/
 
 ## Physics model
 
-A 2.25" ball on a 7 ft table, simulated in the table plane with real coefficients (Marlow; Alciatore):
+A 2.25" / 6 oz ball on a 7 ft table, simulated in the table plane at 480 Hz with published
+coefficients. Sources: Alciatore's technical proofs and property FAQ (billiards.colostate.edu),
+Marlow's *The Physics of Pocket Billiards*, and Mathavan, Jackson & Parkin (Proc. IMechE C, 2010).
 
-- **Cue tip**: ω = 5·v·offset / (2r), so a hit 0.4r above centre starts with natural roll; english
-  squirts the cue ball ~3° away from the tip side at maximum offset.
-- **Cloth**: sliding friction μs = 0.20 acts while the contact point slips (stun, stop, follow, draw all
-  come from this), then rolling resistance μr = 0.015; english decays with μsp = 0.044.
-- **Ball–ball**: restitution 0.95 plus surface friction μ = 0.05, which gives cut-induced and
-  english-induced throw and transfers a little english to the object ball. The aim guide includes
-  stun throw.
-- **Cushions**: restitution 0.90, angle-dependent friction (Han 2005) for english kicks and
-  running/reverse rebound angles, and the nose rubs off most top/bottom spin, so a rolling ball
-  slows more off a rail than a stunned one and curves after the rail.
-- **Not modelled**: anything vertical (jumps, masse, cushion nose height), speed-dependent
-  coefficients, follow/draw transfer between balls.
+| Effect | Model | Values |
+| --- | --- | --- |
+| Cue tip | ω = 5·v·b / (2r); speed lost to spin via ball/cue mass ratio; squirt per TP A.31 | m_ball/m_cue = 6/19, endmass ratio 19 (→3° at b = 0.5r); tip offset capped at the miscue limit 0.5r |
+| Cloth | Coulomb sliding friction on the contact-point slip until the ball rolls; rolling resistance; constant spin-down | μs = 0.20, μr = 0.01, english decel 10 rad/s² |
+| Ball–ball | Normal restitution + friction impulse along the 3-D surface slip (cut- and english-induced throw, english and follow/draw transfer); friction falls with rubbing speed (TP A.14 fit to Marlow) | e = 0.95, μ = 0.0100 + 0.108·e^(−1.088·v_rel) |
+| Cushion | Mathavan 2010: impact integrated over normal impulse with friction at the nose (height 7r/5) and at the cloth; compression then restitution of e² of the work | e = 0.98, μ_nose = 0.14, μ_cloth = 0.20 |
+
+Emergent behaviour: stop/stun/follow/draw and the parabolic cue-ball curve after contact, throw
+(~2° on a 30° stun cut), a rolling ball rebounding ~5° long and at ~0.6× speed, running english
+lengthening and reverse shortening the rebound, rail-induced english, and rail curve.
+
+Not modelled: the ball leaving the cloth (jumps, hops), masse/swerve from cue elevation, cushion
+deformation on very hard hits, and the tiny cloth "ball turn". The aim guide shows stun throw at a
+typical speed but not english or speed effects.
 
 ## Build & run
 

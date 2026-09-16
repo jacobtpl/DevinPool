@@ -208,10 +208,10 @@ private struct ControlsView: View {
 
     private var spinLabel: String {
         let s = model.spin
-        if hypot(s.x, s.y) < 0.08 { return "Spin: none" }
+        if hypot(s.x, s.y) < 0.05 { return "Spin: none" }
         var parts: [String] = []
-        if s.y > 0.15 { parts.append("top") } else if s.y < -0.15 { parts.append("back") }
-        if s.x > 0.15 { parts.append("right") } else if s.x < -0.15 { parts.append("left") }
+        if s.y > 0.1 { parts.append("top") } else if s.y < -0.1 { parts.append("back") }
+        if s.x > 0.1 { parts.append("right") } else if s.x < -0.1 { parts.append("left") }
         return "Spin: " + parts.joined(separator: " + ")
     }
 }
@@ -240,6 +240,11 @@ private struct SpinControl: View {
                 p.addLine(to: CGPoint(x: diameter - 6, y: radius))
             }
             .stroke(Color.black.opacity(0.12), lineWidth: 1)
+            // Miscue limit: the tip slips off the ball beyond half a radius.
+            Circle()
+                .strokeBorder(style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                .foregroundStyle(Color.black.opacity(0.22))
+                .frame(width: diameter * GameModel.maxSpinOffset, height: diameter * GameModel.maxSpinOffset)
             Circle()
                 .fill(Color.red)
                 .frame(width: 11, height: 11)

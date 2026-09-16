@@ -30,7 +30,8 @@ final class GameModel: ObservableObject {
     @Published var spin: CGPoint = .zero
     @Published var isOpenTable = true
 
-    static let maxSpinOffset: CGFloat = 0.8
+    /// Tip offset in ball radii is capped at the miscue limit.
+    static let maxSpinOffset: CGFloat = PhysicsEngine.miscueOffset
 
     var canShoot: Bool { phase == .aiming || phase == .ballInHand }
 
