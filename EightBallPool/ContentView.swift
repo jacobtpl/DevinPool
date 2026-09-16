@@ -173,11 +173,12 @@ private struct MessageBanner: View {
 
 private struct ControlsView: View {
     @ObservedObject var model: GameModel
+    @State private var confirmingNewGame = false
 
     var body: some View {
         HStack(alignment: .center, spacing: 14) {
             Button {
-                model.newGame()
+                confirmingNewGame = true
             } label: {
                 Image(systemName: "arrow.counterclockwise")
                     .font(.system(size: 16, weight: .bold))
@@ -186,6 +187,12 @@ private struct ControlsView: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("New game")
+            .alert("Start a new game?", isPresented: $confirmingNewGame) {
+                Button("New Game", role: .destructive) { model.newGame() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("The current game will be lost.")
+            }
 
             Spacer(minLength: 0)
 
