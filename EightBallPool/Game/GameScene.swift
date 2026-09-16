@@ -104,7 +104,7 @@ final class GameScene: SKScene {
             width: size.width - hudInsets.left - hudInsets.right,
             height: size.height - hudInsets.top - hudInsets.bottom
         )
-        let railFraction: CGFloat = 0.075
+        let railFraction: CGFloat = 0.1
         // Felt is 1:2, surrounded by rails; fit the whole thing in `available`.
         var feltWidth = available.width / (1 + 2 * railFraction)
         var feltHeight = feltWidth * 2
@@ -135,18 +135,48 @@ final class GameScene: SKScene {
         frame.zPosition = 0
         tableLayer.addChild(frame)
 
-        let cushion = SKShapeNode(rect: felt.insetBy(dx: -railWidth * 0.42, dy: -railWidth * 0.42), cornerRadius: 2)
-        cushion.fillColor = UIColor(red: 0.05, green: 0.32, blue: 0.16, alpha: 1)
-        cushion.strokeColor = .clear
-        cushion.zPosition = 1
-        tableLayer.addChild(cushion)
-
-        let surface = SKShapeNode(rect: felt)
+        // Cloth runs under the cushions and into the pocket mouths.
+        let cushionDepth = railWidth * 0.45
+        let surface = SKShapeNode(rect: felt.insetBy(dx: -cushionDepth, dy: -cushionDepth))
         surface.fillColor = UIColor(red: 0.10, green: 0.50, blue: 0.26, alpha: 1)
-        surface.strokeColor = UIColor(red: 0.07, green: 0.40, blue: 0.20, alpha: 1)
-        surface.lineWidth = 1
-        surface.zPosition = 2
+        surface.strokeColor = .clear
+        surface.zPosition = 1
         tableLayer.addChild(surface)
+
+        for p in geo.pockets {
+            let hole = SKShapeNode(circleOfRadius: p.radius * 0.95)
+            hole.position = p.center
+            hole.fillColor = UIColor(white: 0.02, alpha: 1)
+            hole.strokeColor = UIColor(white: 0.3, alpha: 0.5)
+            hole.lineWidth = 1
+            hole.zPosition = 2
+            tableLayer.addChild(hole)
+        }
+
+        let cushionColor = UIColor(red: 0.05, green: 0.34, blue: 0.17, alpha: 1)
+        let noseColor = UIColor(red: 0.03, green: 0.26, blue: 0.13, alpha: 1)
+        for piece in geo.cushions {
+            // Face points, then back along the rail side deep enough to cover the jaws.
+            let out = piece.outward
+            func beyondFelt(_ p: CGPoint) -> CGFloat {
+                (p.x - felt.midX) * out.dx + (p.y - felt.midY) * out.dy - (out.dx != 0 ? felt.width : felt.height) / 2
+            }
+            let depth = max(cushionDepth, piece.face.map(beyondFelt).max() ?? 0) + 1
+            let path = CGMutablePath()
+            path.addLines(between: piece.face)
+            for p in piece.face.reversed() {
+                let push = depth - beyondFelt(p)
+                path.addLine(to: CGPoint(x: p.x + out.dx * push, y: p.y + out.dy * push))
+            }
+            path.closeSubpath()
+            let cushion = SKShapeNode(path: path)
+            cushion.fillColor = cushionColor
+            cushion.strokeColor = noseColor
+            cushion.lineWidth = 1.5
+            cushion.lineJoin = .round
+            cushion.zPosition = 3
+            tableLayer.addChild(cushion)
+        }
 
         // Head string and foot spot.
         let headLine = SKShapeNode()
@@ -185,22 +215,6 @@ final class GameScene: SKScene {
             }
         }
 
-        for p in geo.pockets {
-            let rim = SKShapeNode(circleOfRadius: geo.pocketRadius * 1.05)
-            rim.position = p
-            rim.fillColor = UIColor(red: 0.16, green: 0.10, blue: 0.05, alpha: 1)
-            rim.strokeColor = .clear
-            rim.zPosition = 4
-            tableLayer.addChild(rim)
-
-            let hole = SKShapeNode(circleOfRadius: geo.pocketRadius * 0.92)
-            hole.position = p
-            hole.fillColor = UIColor(white: 0.02, alpha: 1)
-            hole.strokeColor = UIColor(white: 0.25, alpha: 0.6)
-            hole.lineWidth = 1
-            hole.zPosition = 5
-            tableLayer.addChild(hole)
-        }
     }
 
     private func diamond(at point: CGPoint, size: CGFloat, color: UIColor) -> SKShapeNode {
@@ -322,8 +336,10 @@ final class GameScene: SKScene {
             ballLayer.addChild(shadow)
             shadowNodes[ball.number] = shadow
 
-            let node = SKSpriteNode(texture: BallTextures.ballTexture(number: ball.number, diameter: diameter))
+            let node = SKSpriteNode(texture: BallTextures.sphereMap(number: ball.number))
             node.size = CGSize(width: diameter, height: diameter)
+            node.shader = BallTextures.sphereShader
+            BallTextures.applyRotation(ball.orientation, to: node)
             node.zPosition = 1
             node.isHidden = ball.isPocketed
             ballLayer.addChild(node)
@@ -350,6 +366,7 @@ final class GameScene: SKScene {
                 result.append(Ball(number: number, position: CGPoint(x: x, y: y)))
             }
         }
+        for ball in result { ball.randomizeOrientation() }
         return result
     }
 
@@ -492,6 +509,9 @@ final class GameScene: SKScene {
 
         if phase == .ballsMoving, let engine {
             let events = engine.step(dt: dt, balls: balls, shot: &shot)
+            for ball in balls where !ball.isPocketed && ball.isActive {
+                ball.roll(dt: dt, radius: engine.geometry.ballRadius)
+            }
             for ball in events.potted { animatePocket(ball) }
             if events.strongestCollision > engine.geometry.ballRadius * 4, hapticCooldown == 0 {
                 let intensity = min(1, events.strongestCollision / engine.maxShotSpeed + 0.3)
@@ -521,7 +541,10 @@ final class GameScene: SKScene {
     private func syncNodes() {
         guard let geo = geometry else { return }
         for ball in balls where !ball.isPocketed {
-            ballNodes[ball.number]?.position = ball.position
+            if let node = ballNodes[ball.number] {
+                node.position = ball.position
+                BallTextures.applyRotation(ball.orientation, to: node)
+            }
             shadowNodes[ball.number]?.position = CGPoint(x: ball.position.x + geo.ballRadius * 0.18,
                                                          y: ball.position.y - geo.ballRadius * 0.28)
         }

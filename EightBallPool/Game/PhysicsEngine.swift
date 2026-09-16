@@ -1,51 +1,120 @@
 import CoreGraphics
 
+struct Pocket {
+    let center: CGPoint
+    let radius: CGFloat
+    let isCorner: Bool
+}
+
+/// One straight piece of cushion face (a nose or a jaw).
+struct CushionSegment {
+    let a: CGPoint
+    let b: CGPoint
+}
+
+/// A run of cushion between two pockets: jaw → nose → jaw, listed in order so it can be filled as a polygon.
+struct CushionPiece {
+    /// Face points from the first jaw tip, along the nose, to the last jaw tip.
+    let face: [CGPoint]
+    /// Unit normal pointing away from the felt (into the rail).
+    let outward: CGVector
+}
+
 struct TableGeometry {
     /// Playing surface bounded by the cushion noses.
     let felt: CGRect
     let ballRadius: CGFloat
 
-    var pocketRadius: CGFloat { ballRadius * 2.1 }
-    /// Capture radius for a ball that has already passed the cushion line into the jaws.
-    var jawCaptureRadius: CGFloat { ballRadius * 3.0 }
-    /// Length of cushion next to each felt corner that belongs to the corner pocket's jaws.
-    var cornerMouth: CGFloat { ballRadius * 2.6 }
-    /// Half-width of the side pocket opening along the long rails.
-    var sideMouthHalf: CGFloat { ballRadius * 2.2 }
+    /// Distance from the felt corner to the corner-pocket cushion nose along each rail.
+    /// Gives a mouth of ~4.2 ball radii measured nose to nose (a 4.5" mouth on a 2.25" ball).
+    var cornerNoseOffset: CGFloat { ballRadius * 3.0 }
+    /// Half the side-pocket mouth measured nose to nose (~5.2" on a 2.25" ball).
+    var sideNoseHalf: CGFloat { ballRadius * 2.2 }
+    /// Corner jaws are cut at ~142° to the rail (38° into the pocket); side jaws at ~103° (13° flare).
+    var cornerJawAngle: CGFloat { 38 * .pi / 180 }
+    var sideJawAngle: CGFloat { 13 * .pi / 180 }
+    var cornerJawLength: CGFloat { ballRadius * 1.6 }
+    var sideJawLength: CGFloat { ballRadius * 1.5 }
 
-    var cornerPocketOffset: CGFloat { ballRadius * 0.4 }
-    var sidePocketOffset: CGFloat { ballRadius * 0.6 }
-
-    var pockets: [CGPoint] {
-        let c = cornerPocketOffset
-        let s = sidePocketOffset
+    var pockets: [Pocket] {
+        let r = ballRadius
+        let c = r * 1.0
         return [
-            CGPoint(x: felt.minX - c, y: felt.minY - c),
-            CGPoint(x: felt.maxX + c, y: felt.minY - c),
-            CGPoint(x: felt.minX - c, y: felt.maxY + c),
-            CGPoint(x: felt.maxX + c, y: felt.maxY + c),
-            CGPoint(x: felt.minX - s, y: felt.midY),
-            CGPoint(x: felt.maxX + s, y: felt.midY),
+            Pocket(center: CGPoint(x: felt.minX - c, y: felt.minY - c), radius: r * 2.2, isCorner: true),
+            Pocket(center: CGPoint(x: felt.maxX + c, y: felt.minY - c), radius: r * 2.2, isCorner: true),
+            Pocket(center: CGPoint(x: felt.minX - c, y: felt.maxY + c), radius: r * 2.2, isCorner: true),
+            Pocket(center: CGPoint(x: felt.maxX + c, y: felt.maxY + c), radius: r * 2.2, isCorner: true),
+            Pocket(center: CGPoint(x: felt.minX - r * 1.6, y: felt.midY), radius: r * 1.8, isCorner: false),
+            Pocket(center: CGPoint(x: felt.maxX + r * 1.6, y: felt.midY), radius: r * 1.8, isCorner: false),
         ]
+    }
+
+    /// Six cushion pieces: two short rails and the four halves of the long rails either side of the side pockets.
+    var cushions: [CushionPiece] {
+        let f = felt
+        let cn = cornerNoseOffset
+        let sn = sideNoseHalf
+        let cj = cornerJawLength, sj = sideJawLength
+        let ca = cornerJawAngle, sa = sideJawAngle
+
+        func cornerJaw(from nose: CGPoint, alongRail: CGVector, outward: CGVector) -> CGPoint {
+            // Leaves the nose heading toward the corner, bent `ca` into the rail.
+            CGPoint(x: nose.x + (alongRail.dx * cos(ca) + outward.dx * sin(ca)) * cj,
+                    y: nose.y + (alongRail.dy * cos(ca) + outward.dy * sin(ca)) * cj)
+        }
+        func sideJaw(from nose: CGPoint, towardPocket: CGVector, outward: CGVector) -> CGPoint {
+            // Nearly straight back into the rail, flared `sa` toward the pocket centre.
+            CGPoint(x: nose.x + (outward.dx * cos(sa) + towardPocket.dx * sin(sa)) * sj,
+                    y: nose.y + (outward.dy * cos(sa) + towardPocket.dy * sin(sa)) * sj)
+        }
+
+        var pieces: [CushionPiece] = []
+
+        // Bottom rail (outward -y) and top rail (outward +y).
+        for (y, out) in [(f.minY, CGVector(dx: 0, dy: -1)), (f.maxY, CGVector(dx: 0, dy: 1))] {
+            let left = CGPoint(x: f.minX + cn, y: y)
+            let right = CGPoint(x: f.maxX - cn, y: y)
+            pieces.append(CushionPiece(face: [
+                cornerJaw(from: left, alongRail: CGVector(dx: -1, dy: 0), outward: out),
+                left, right,
+                cornerJaw(from: right, alongRail: CGVector(dx: 1, dy: 0), outward: out),
+            ], outward: out))
+        }
+
+        // Left rail (outward -x) and right rail (outward +x), split by the side pocket.
+        for (x, out) in [(f.minX, CGVector(dx: -1, dy: 0)), (f.maxX, CGVector(dx: 1, dy: 0))] {
+            let lowerCorner = CGPoint(x: x, y: f.minY + cn)
+            let lowerSide = CGPoint(x: x, y: f.midY - sn)
+            pieces.append(CushionPiece(face: [
+                cornerJaw(from: lowerCorner, alongRail: CGVector(dx: 0, dy: -1), outward: out),
+                lowerCorner, lowerSide,
+                sideJaw(from: lowerSide, towardPocket: CGVector(dx: 0, dy: 1), outward: out),
+            ], outward: out))
+
+            let upperSide = CGPoint(x: x, y: f.midY + sn)
+            let upperCorner = CGPoint(x: x, y: f.maxY - cn)
+            pieces.append(CushionPiece(face: [
+                sideJaw(from: upperSide, towardPocket: CGVector(dx: 0, dy: -1), outward: out),
+                upperSide, upperCorner,
+                cornerJaw(from: upperCorner, alongRail: CGVector(dx: 0, dy: 1), outward: out),
+            ], outward: out))
+        }
+        return pieces
+    }
+
+    /// Every cushion face as collidable line segments.
+    var cushionSegments: [CushionSegment] {
+        cushions.flatMap { piece in
+            zip(piece.face, piece.face.dropFirst()).map { CushionSegment(a: $0, b: $1) }
+        }
     }
 
     var headSpot: CGPoint { CGPoint(x: felt.midX, y: felt.minY + felt.height * 0.25) }
     var footSpot: CGPoint { CGPoint(x: felt.midX, y: felt.minY + felt.height * 0.75) }
 
-    /// True when a ball touching a long (vertical) rail at this y is inside a pocket opening.
-    func isMouthOnLongRail(y: CGFloat) -> Bool {
-        y < felt.minY + cornerMouth || y > felt.maxY - cornerMouth || abs(y - felt.midY) < sideMouthHalf
-    }
-
-    /// True when a ball touching a short (horizontal) rail at this x is inside a corner pocket opening.
-    func isMouthOnShortRail(x: CGFloat) -> Bool {
-        x < felt.minX + cornerMouth || x > felt.maxX - cornerMouth
-    }
-
-    /// True once a ball's centre has crossed the cushion line (only possible inside a pocket opening).
-    func isInJaws(_ p: CGPoint) -> Bool {
-        let r = ballRadius * 0.5
-        return p.x < felt.minX + r || p.x > felt.maxX - r || p.y < felt.minY + r || p.y > felt.maxY - r
+    /// How far a ball centre sits beyond the cushion nose line (0 when on the felt).
+    func overhang(_ p: CGPoint) -> CGFloat {
+        max(felt.minX - p.x, p.x - felt.maxX, felt.minY - p.y, p.y - felt.maxY, 0)
     }
 
     func clampInside(_ p: CGPoint) -> CGPoint {
@@ -86,8 +155,13 @@ final class PhysicsEngine {
     private let cushionSideSpinKick: CGFloat = 0.55
     private let cushionSideSpinRetained: CGFloat = 0.5
 
+    private let cushionSegments: [CushionSegment]
+    private let pockets: [Pocket]
+
     init(geometry: TableGeometry) {
         self.geometry = geometry
+        cushionSegments = geometry.cushionSegments
+        pockets = geometry.pockets
         rollingDeceleration = geometry.ballRadius * 5.0
         stopSpeed = geometry.ballRadius * 0.5
     }
@@ -187,38 +261,36 @@ final class PhysicsEngine {
         }
     }
 
+    /// Circle-vs-segment collision against every cushion face. Segment end points act as rounded
+    /// nose tips, which is what makes balls rattle in the jaws.
     private func resolveCushions(balls: [Ball]) {
         let r = geometry.ballRadius
         let felt = geometry.felt
+        let margin = r * 1.05
         for b in balls where !b.isPocketed {
-            if !geometry.isMouthOnLongRail(y: b.position.y) {
-                if b.position.x - r < felt.minX {
-                    b.position.x = felt.minX + r
-                    if b.velocity.dx < 0 {
-                        b.velocity.dx = -b.velocity.dx * cushionRestitution
-                        applySideSpin(to: b, normal: CGVector(dx: 1, dy: 0))
-                    }
-                } else if b.position.x + r > felt.maxX {
-                    b.position.x = felt.maxX - r
-                    if b.velocity.dx > 0 {
-                        b.velocity.dx = -b.velocity.dx * cushionRestitution
-                        applySideSpin(to: b, normal: CGVector(dx: -1, dy: 0))
-                    }
-                }
+            // Balls well inside the felt cannot touch a cushion; skip the segment tests.
+            let p = b.position
+            if p.x - felt.minX > margin, felt.maxX - p.x > margin, p.y - felt.minY > margin, felt.maxY - p.y > margin {
+                continue
             }
-            if !geometry.isMouthOnShortRail(x: b.position.x) {
-                if b.position.y - r < felt.minY {
-                    b.position.y = felt.minY + r
-                    if b.velocity.dy < 0 {
-                        b.velocity.dy = -b.velocity.dy * cushionRestitution
-                        applySideSpin(to: b, normal: CGVector(dx: 0, dy: 1))
-                    }
-                } else if b.position.y + r > felt.maxY {
-                    b.position.y = felt.maxY - r
-                    if b.velocity.dy > 0 {
-                        b.velocity.dy = -b.velocity.dy * cushionRestitution
-                        applySideSpin(to: b, normal: CGVector(dx: 0, dy: -1))
-                    }
+            for seg in cushionSegments {
+                let abx = seg.b.x - seg.a.x, aby = seg.b.y - seg.a.y
+                let apx = b.position.x - seg.a.x, apy = b.position.y - seg.a.y
+                let lenSq = abx * abx + aby * aby
+                let t = lenSq > 0 ? min(max((apx * abx + apy * aby) / lenSq, 0), 1) : 0
+                let cx = seg.a.x + abx * t, cy = seg.a.y + aby * t
+                let dx = b.position.x - cx, dy = b.position.y - cy
+                let distSq = dx * dx + dy * dy
+                if distSq >= r * r || distSq == 0 { continue }
+                let dist = distSq.squareRoot()
+                let n = CGVector(dx: dx / dist, dy: dy / dist)
+                b.position.x += n.dx * (r - dist)
+                b.position.y += n.dy * (r - dist)
+                let vn = b.velocity.dx * n.dx + b.velocity.dy * n.dy
+                if vn < 0 {
+                    b.velocity.dx -= (1 + cushionRestitution) * vn * n.dx
+                    b.velocity.dy -= (1 + cushionRestitution) * vn * n.dy
+                    applySideSpin(to: b, normal: n)
                 }
             }
         }
@@ -234,37 +306,16 @@ final class PhysicsEngine {
     }
 
     private func detectPockets(balls: [Ball], shot: inout ShotRecord, events: inout StepEvents) {
-        let captureSq = geometry.pocketRadius * geometry.pocketRadius
-        let jawCaptureSq = geometry.jawCaptureRadius * geometry.jawCaptureRadius
         for b in balls where !b.isPocketed {
             let pocket = nearestPocket(to: b.position)
-            let dx = b.position.x - pocket.x
-            let dy = b.position.y - pocket.y
-            let distSq = dx * dx + dy * dy
-            var captured = distSq < captureSq
-
-            if !captured, geometry.isInJaws(b.position) {
-                if distSq < jawCaptureSq {
-                    captured = true
-                } else {
-                    // Angled jaws: funnel the ball towards the pocket centre.
-                    let dist = distSq.squareRoot()
-                    if !b.isMoving {
-                        b.velocity = CGVector(dx: -dx / dist * stopSpeed * 4, dy: -dy / dist * stopSpeed * 4)
-                    }
-                    let speed = b.speed
-                    let blend: CGFloat = 0.12
-                    var vx = b.velocity.dx / speed * (1 - blend) - dx / dist * blend
-                    var vy = b.velocity.dy / speed * (1 - blend) - dy / dist * blend
-                    let len = max(hypot(vx, vy), 0.0001)
-                    vx /= len
-                    vy /= len
-                    b.velocity = CGVector(dx: vx * speed, dy: vy * speed)
-                }
-            }
+            let dx = b.position.x - pocket.center.x
+            let dy = b.position.y - pocket.center.y
+            // A ball that has slipped past the jaw tips has nowhere else to go.
+            let captured = dx * dx + dy * dy < pocket.radius * pocket.radius
+                || geometry.overhang(b.position) > geometry.ballRadius * 1.2
 
             if captured {
-                b.position = pocket
+                b.position = pocket.center
                 b.isPocketed = true
                 b.velocity = .zero
                 b.spin = .zero
@@ -275,10 +326,10 @@ final class PhysicsEngine {
         }
     }
 
-    func nearestPocket(to p: CGPoint) -> CGPoint {
-        geometry.pockets.min { a, b in
-            hypot(a.x - p.x, a.y - p.y) < hypot(b.x - p.x, b.y - p.y)
-        } ?? p
+    func nearestPocket(to p: CGPoint) -> Pocket {
+        pockets.min { a, b in
+            hypot(a.center.x - p.x, a.center.y - p.y) < hypot(b.center.x - p.x, b.center.y - p.y)
+        }!
     }
 
     // MARK: - Aim prediction
