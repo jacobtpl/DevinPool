@@ -1,5 +1,4 @@
 import Combine
-import SpriteKit
 import SwiftUI
 
 enum GamePhase: Equatable {
@@ -29,6 +28,7 @@ final class GameModel: ObservableObject {
     /// Cue-tip offset on the cue ball as seen from behind the cue: x = english (right positive), y = follow (+) / draw (-).
     @Published var spin: CGPoint = .zero
     @Published var isOpenTable = true
+    @Published var cameraMode: CameraMode = .pov
 
     /// Tip offset in ball radii is capped at the miscue limit.
     static let maxSpinOffset: CGFloat = PhysicsEngine.miscueOffset
@@ -40,11 +40,10 @@ final class GameModel: ObservableObject {
         return nil
     }
 
-    lazy var scene: GameScene = {
-        let scene = GameScene()
-        scene.scaleMode = .resizeFill
-        scene.model = self
-        return scene
+    lazy var controller: GameController = {
+        let controller = GameController()
+        controller.model = self
+        return controller
     }()
 
     func shoot() {
@@ -52,7 +51,7 @@ final class GameModel: ObservableObject {
             power = 0
             return
         }
-        scene.shoot(power: power, spin: spin)
+        controller.shoot(power: power, spin: spin)
         power = 0
         spin = .zero
     }
@@ -66,6 +65,10 @@ final class GameModel: ObservableObject {
     func newGame() {
         power = 0
         spin = .zero
-        scene.newGame()
+        controller.newGame()
+    }
+
+    func toggleCamera() {
+        cameraMode = cameraMode == .pov ? .overhead : .pov
     }
 }

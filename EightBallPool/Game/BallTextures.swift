@@ -1,10 +1,6 @@
-import simd
-import SpriteKit
 import UIKit
 
-/// Balls are drawn as shaded spheres by `sphereShader`: each ball sprite carries an equirectangular
-/// "sphere map" texture and a per-node rotation matrix, and the fragment shader projects the visible
-/// hemisphere so numbers and stripes roll with the ball.
+/// Ball colours and the equirectangular "sphere map" textures wrapped onto the 3-D balls.
 enum BallTextures {
     static func baseColor(_ number: Int) -> UIColor {
         switch number {
@@ -23,52 +19,14 @@ enum BallTextures {
         }
     }
 
-    // MARK: - Sphere shader
+    private static var sphereMapCache: [Int: UIImage] = [:]
 
-    static let rotationAttributes = ["a_c0", "a_c1", "a_c2"]
-
-    /// Orthographic sphere: the sprite quad is the ball's silhouette; `a_c0..2` are the columns of the
-    /// ball's local-to-world rotation, so `transpose(R) * normal` looks up the sphere map.
-    static let sphereShader: SKShader = {
-        let source = """
-        void main() {
-            vec2 p = (v_tex_coord - 0.5) * 2.0;
-            float r2 = min(dot(p, p), 1.0);
-            vec3 n = vec3(p.x, p.y, sqrt(1.0 - r2));
-            vec3 l = vec3(dot(a_c0, n), dot(a_c1, n), dot(a_c2, n));
-            float lon = atan(l.x, l.z);
-            float lat = asin(clamp(l.y, -1.0, 1.0));
-            vec2 uv = vec2(lon / 6.2831853 + 0.5, 0.5 + lat / 3.1415927);
-            vec3 albedo = texture2D(u_texture, uv).rgb;
-            vec3 lightDir = normalize(vec3(-0.35, 0.55, 0.75));
-            float diffuse = 0.42 + 0.58 * max(dot(n, lightDir), 0.0);
-            float spec = pow(max(dot(reflect(-lightDir, n), vec3(0.0, 0.0, 1.0)), 0.0), 48.0) * 0.55;
-            vec3 color = albedo * diffuse + vec3(spec);
-            float edge = 1.0 - smoothstep(0.90, 1.0, r2);
-            gl_FragColor = vec4(color, 1.0) * edge;
-        }
-        """
-        let shader = SKShader(source: source)
-        shader.attributes = rotationAttributes.map { SKAttribute(name: $0, type: .vectorFloat3) }
-        return shader
-    }()
-
-    static func applyRotation(_ rotation: simd_quatf, to node: SKSpriteNode) {
-        let m = simd_float3x3(rotation)
-        node.setValue(SKAttributeValue(vectorFloat3: m.columns.0), forAttribute: "a_c0")
-        node.setValue(SKAttributeValue(vectorFloat3: m.columns.1), forAttribute: "a_c1")
-        node.setValue(SKAttributeValue(vectorFloat3: m.columns.2), forAttribute: "a_c2")
-    }
-
-    // MARK: - Sphere maps
-
-    private static var sphereMapCache: [Int: SKTexture] = [:]
-
-    /// Equirectangular map (longitude across, latitude down). The stripe is a band around the equator,
-    /// the number circles sit on the equator at ±90° so the texture seam (±180°) falls in plain colour.
-    static func sphereMap(number: Int) -> SKTexture {
+    /// Equirectangular map (longitude across, latitude down, matching SceneKit's sphere UVs). The stripe
+    /// is a band around the equator; the number circles sit on the equator at ±90° so the texture seam
+    /// (±180°) falls in plain colour.
+    static func sphereMap(number: Int) -> UIImage {
         if let cached = sphereMapCache[number] { return cached }
-        let width = 512, height = 256
+        let width = 1024, height = 512
         let base = baseColor(number)
         let isStripe = number >= 9
 
@@ -77,7 +35,7 @@ enum BallTextures {
 
         let stripeHalfWidth: CGFloat = 0.62      // radians of latitude
         let circleRadius: CGFloat = 0.44         // angular radius of the number circle
-        let softness: CGFloat = 0.012            // antialiasing width in radians
+        let softness: CGFloat = 0.006            // antialiasing width in radians
 
         var pixels = [UInt8](repeating: 255, count: width * height * 4)
         for y in 0..<height {
@@ -107,7 +65,7 @@ enum BallTextures {
               let baseImage = CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32,
                                       bytesPerRow: width * 4, space: colorSpace, bitmapInfo: bitmapInfo,
                                       provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent) else {
-            return SKTexture()
+            return UIImage()
         }
 
         let format = UIGraphicsImageRendererFormat()
@@ -136,36 +94,12 @@ enum BallTextures {
                                      width: pixelRadius * 2, height: textSize.height))
             }
         }
-        let texture = SKTexture(image: image)
-        texture.filteringMode = .linear
-        sphereMapCache[number] = texture
-        return texture
+        sphereMapCache[number] = image
+        return image
     }
 
     /// 0 → 1 across `[-softness, softness]`.
     private static func smooth(_ value: CGFloat, _ softness: CGFloat) -> CGFloat {
         min(max((value + softness) / (2 * softness), 0), 1)
-    }
-
-    static func shadowTexture(diameter: CGFloat) -> SKTexture {
-        let d = diameter * 1.5
-        let format = UIGraphicsImageRendererFormat()
-        format.scale = 2
-        format.opaque = false
-        let renderer = UIGraphicsImageRenderer(size: CGSize(width: d, height: d), format: format)
-        let image = renderer.image { ctx in
-            let cg = ctx.cgContext
-            let colorSpace = CGColorSpaceCreateDeviceRGB()
-            if let gradient = CGGradient(colorsSpace: colorSpace,
-                                         colors: [UIColor(white: 0, alpha: 0.55).cgColor,
-                                                  UIColor(white: 0, alpha: 0.35).cgColor,
-                                                  UIColor(white: 0, alpha: 0).cgColor] as CFArray,
-                                         locations: [0, 0.55, 1]) {
-                let center = CGPoint(x: d / 2, y: d / 2)
-                cg.drawRadialGradient(gradient, startCenter: center, startRadius: 0,
-                                      endCenter: center, endRadius: d / 2, options: [])
-            }
-        }
-        return SKTexture(image: image)
     }
 }

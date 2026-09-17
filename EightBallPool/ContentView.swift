@@ -1,4 +1,3 @@
-import SpriteKit
 import SwiftUI
 
 struct ContentView: View {
@@ -9,52 +8,39 @@ struct ContentView: View {
     private let powerBarWidth: CGFloat = 40
 
     var body: some View {
-        GeometryReader { geo in
-            ZStack {
-                SpriteView(scene: model.scene)
-                    .ignoresSafeArea()
-                    .onAppear { updateInsets(geo) }
-                    .onChange(of: geo.safeAreaInsets) { _, _ in updateInsets(geo) }
+        ZStack {
+            GameSceneView(controller: model.controller)
+                .ignoresSafeArea()
 
-                VStack(spacing: 0) {
-                    VStack(spacing: 6) {
-                        ScoreboardView(model: model)
-                        MessageBanner(text: model.message, phase: model.phase)
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.top, 4)
-                    .frame(height: topHUDHeight, alignment: .top)
+            VStack(spacing: 0) {
+                VStack(spacing: 6) {
+                    ScoreboardView(model: model)
+                    MessageBanner(text: model.message, phase: model.phase)
+                }
+                .padding(.horizontal, 12)
+                .padding(.top, 4)
+                .frame(height: topHUDHeight, alignment: .top)
 
-                    HStack(spacing: 0) {
-                        Spacer(minLength: 0)
-                        PowerBar(model: model)
-                            .frame(width: powerBarWidth)
-                            .padding(.vertical, 24)
-                            .padding(.trailing, 8)
-                    }
-
-                    ControlsView(model: model)
-                        .padding(.horizontal, 14)
-                        .frame(height: bottomHUDHeight, alignment: .bottom)
-                        .padding(.bottom, 2)
+                HStack(spacing: 0) {
+                    Spacer(minLength: 0)
+                    PowerBar(model: model)
+                        .frame(width: powerBarWidth)
+                        .padding(.vertical, 24)
+                        .padding(.trailing, 8)
                 }
 
-                if let winner = model.winner {
-                    GameOverView(winner: winner, message: model.message) {
-                        model.newGame()
-                    }
+                ControlsView(model: model)
+                    .padding(.horizontal, 14)
+                    .frame(height: bottomHUDHeight, alignment: .bottom)
+                    .padding(.bottom, 2)
+            }
+
+            if let winner = model.winner {
+                GameOverView(winner: winner, message: model.message) {
+                    model.newGame()
                 }
             }
         }
-    }
-
-    private func updateInsets(_ geo: GeometryProxy) {
-        model.scene.hudInsets = UIEdgeInsets(
-            top: geo.safeAreaInsets.top + topHUDHeight + 4,
-            left: 10,
-            bottom: geo.safeAreaInsets.bottom + bottomHUDHeight + 6,
-            right: 8 + powerBarWidth + 8
-        )
     }
 }
 
@@ -194,6 +180,17 @@ private struct ControlsView: View {
                 Text("The current game will be lost.")
             }
 
+            Button {
+                model.toggleCamera()
+            } label: {
+                Image(systemName: model.cameraMode == .pov ? "square.grid.3x3.topleft.filled" : "eye")
+                    .font(.system(size: 16, weight: .bold))
+                    .frame(width: 44, height: 44)
+                    .background(Circle().fill(Color.white.opacity(0.12)))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(model.cameraMode == .pov ? "Overhead view" : "Player view")
+
             Spacer(minLength: 0)
 
             VStack(spacing: 2) {
@@ -201,7 +198,7 @@ private struct ControlsView: View {
                     .font(.system(.caption2, design: .rounded, weight: .bold))
                     .foregroundStyle(.white.opacity(0.7))
                     .lineLimit(1)
-                Text(model.power > 0.05 ? "Release to shoot" : "Pull the bar down to set power")
+                Text(model.power > 0.05 ? "Release to shoot" : (model.cameraMode == .pov ? "Drag to aim · pull bar to shoot" : "Pull the bar down to set power"))
                     .font(.system(.caption2, design: .rounded))
                     .foregroundStyle(.white.opacity(0.45))
                     .lineLimit(1)
