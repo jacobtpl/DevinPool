@@ -1,5 +1,4 @@
 import Combine
-import SpriteKit
 import SwiftUI
 
 enum GamePhase: Equatable {
@@ -26,7 +25,15 @@ final class GameModel: ObservableObject {
     ]
     @Published var message = "Player 1 to break"
     @Published var power: CGFloat = 0
+    /// Cue-tip offset on the cue ball as seen from behind the cue: x = english (right positive), y = follow (+) / draw (-).
+    @Published var spin: CGPoint = .zero
     @Published var isOpenTable = true
+    @Published var cameraMode: CameraMode = .pov
+    /// Aim guide (cue-ball path, ghost ball, object-ball line); off for a realistic game.
+    @Published var showGuide = false
+
+    /// Tip offset in ball radii is capped at the miscue limit.
+    static let maxSpinOffset: CGFloat = PhysicsEngine.miscueOffset
 
     var canShoot: Bool { phase == .aiming || phase == .ballInHand }
 
@@ -35,11 +42,10 @@ final class GameModel: ObservableObject {
         return nil
     }
 
-    lazy var scene: GameScene = {
-        let scene = GameScene()
-        scene.scaleMode = .resizeFill
-        scene.model = self
-        return scene
+    lazy var controller: GameController = {
+        let controller = GameController()
+        controller.model = self
+        return controller
     }()
 
     func shoot() {
@@ -47,12 +53,24 @@ final class GameModel: ObservableObject {
             power = 0
             return
         }
-        scene.shoot(power: power)
+        controller.shoot(power: power, spin: spin)
         power = 0
+        spin = .zero
+    }
+
+    func setSpin(_ offset: CGPoint) {
+        let len = hypot(offset.x, offset.y)
+        let limit = Self.maxSpinOffset
+        spin = len > limit ? CGPoint(x: offset.x / len * limit, y: offset.y / len * limit) : offset
     }
 
     func newGame() {
         power = 0
-        scene.newGame()
+        spin = .zero
+        controller.newGame()
+    }
+
+    func toggleCamera() {
+        cameraMode = cameraMode == .pov ? .overhead : .pov
     }
 }

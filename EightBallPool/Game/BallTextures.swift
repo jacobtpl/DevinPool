@@ -1,6 +1,6 @@
-import SpriteKit
 import UIKit
 
+/// Ball colours and the equirectangular "sphere map" textures wrapped onto the 3-D balls.
 enum BallTextures {
     static func baseColor(_ number: Int) -> UIColor {
         switch number {
@@ -19,98 +19,87 @@ enum BallTextures {
         }
     }
 
-    static func ballTexture(number: Int, diameter: CGFloat) -> SKTexture {
-        let d = diameter
-        let format = UIGraphicsImageRendererFormat()
-        format.scale = 3
-        format.opaque = false
-        let renderer = UIGraphicsImageRenderer(size: CGSize(width: d, height: d), format: format)
-        let image = renderer.image { ctx in
-            let cg = ctx.cgContext
-            let rect = CGRect(x: 0, y: 0, width: d, height: d)
-            let base = baseColor(number)
-            let isStripe = number >= 9
+    private static var sphereMapCache: [Int: UIImage] = [:]
 
-            cg.saveGState()
-            UIBezierPath(ovalIn: rect).addClip()
+    /// Equirectangular map (longitude across, latitude down, matching SceneKit's sphere UVs). The stripe
+    /// is a band around the equator; the number circles sit on the equator at ±90° so the texture seam
+    /// (±180°) falls in plain colour.
+    static func sphereMap(number: Int) -> UIImage {
+        if let cached = sphereMapCache[number] { return cached }
+        let width = 1024, height = 512
+        let base = baseColor(number)
+        let isStripe = number >= 9
 
-            (isStripe ? UIColor.white : base).setFill()
-            cg.fill(rect)
+        var baseRGB = (r: CGFloat(0), g: CGFloat(0), b: CGFloat(0), a: CGFloat(0))
+        base.getRed(&baseRGB.r, green: &baseRGB.g, blue: &baseRGB.b, alpha: &baseRGB.a)
 
-            if isStripe {
-                base.setFill()
-                cg.fill(CGRect(x: 0, y: d * 0.23, width: d, height: d * 0.54))
+        let stripeHalfWidth: CGFloat = 0.62      // radians of latitude
+        let circleRadius: CGFloat = 0.44         // angular radius of the number circle
+        let softness: CGFloat = 0.006            // antialiasing width in radians
+
+        var pixels = [UInt8](repeating: 255, count: width * height * 4)
+        for y in 0..<height {
+            let lat = (0.5 - (CGFloat(y) + 0.5) / CGFloat(height)) * .pi
+            let cosLat = cos(lat)
+            for x in 0..<width {
+                let lon = ((CGFloat(x) + 0.5) / CGFloat(width) - 0.5) * 2 * .pi
+                var colorMix: CGFloat = isStripe ? smooth(stripeHalfWidth - abs(lat), softness) : 1
+                if number > 0 {
+                    // Angular distance to the nearest number-circle centre (lat 0, lon ±90°).
+                    let d1 = acos(min(1, max(-1, cosLat * cos(lon - .pi / 2))))
+                    let d2 = acos(min(1, max(-1, cosLat * cos(lon + .pi / 2))))
+                    let inCircle = smooth(circleRadius - min(d1, d2), softness)
+                    colorMix *= 1 - inCircle
+                }
+                let i = (y * width + x) * 4
+                pixels[i] = UInt8(clamping: Int((baseRGB.r * colorMix + (1 - colorMix)) * 255))
+                pixels[i + 1] = UInt8(clamping: Int((baseRGB.g * colorMix + (1 - colorMix)) * 255))
+                pixels[i + 2] = UInt8(clamping: Int((baseRGB.b * colorMix + (1 - colorMix)) * 255))
+                pixels[i + 3] = 255
             }
-
-            if number > 0 {
-                let circleRadius = d * 0.26
-                let circleRect = CGRect(x: d / 2 - circleRadius, y: d / 2 - circleRadius,
-                                        width: circleRadius * 2, height: circleRadius * 2)
-                UIColor.white.setFill()
-                UIBezierPath(ovalIn: circleRect).fill()
-
-                let fontSize = number >= 10 ? d * 0.26 : d * 0.32
-                let paragraph = NSMutableParagraphStyle()
-                paragraph.alignment = .center
-                let attributes: [NSAttributedString.Key: Any] = [
-                    .font: UIFont.systemFont(ofSize: fontSize, weight: .heavy),
-                    .foregroundColor: UIColor(white: 0.1, alpha: 1),
-                    .paragraphStyle: paragraph,
-                ]
-                let text = NSAttributedString(string: "\(number)", attributes: attributes)
-                let textSize = text.size()
-                text.draw(in: CGRect(x: 0, y: d / 2 - textSize.height / 2 - d * 0.005, width: d, height: textSize.height))
-            }
-
-            let colorSpace = CGColorSpaceCreateDeviceRGB()
-
-            // Edge shading for a rounded look.
-            if let shade = CGGradient(colorsSpace: colorSpace,
-                                      colors: [UIColor.clear.cgColor,
-                                               UIColor.clear.cgColor,
-                                               UIColor(white: 0, alpha: 0.45).cgColor] as CFArray,
-                                      locations: [0, 0.62, 1]) {
-                let center = CGPoint(x: d * 0.42, y: d * 0.40)
-                cg.drawRadialGradient(shade, startCenter: center, startRadius: 0,
-                                      endCenter: center, endRadius: d * 0.72, options: [.drawsAfterEndLocation])
-            }
-
-            // Specular highlight.
-            if let highlight = CGGradient(colorsSpace: colorSpace,
-                                          colors: [UIColor(white: 1, alpha: 0.85).cgColor,
-                                                   UIColor(white: 1, alpha: 0).cgColor] as CFArray,
-                                          locations: [0, 1]) {
-                let center = CGPoint(x: d * 0.34, y: d * 0.30)
-                cg.drawRadialGradient(highlight, startCenter: center, startRadius: 0,
-                                      endCenter: center, endRadius: d * 0.30, options: [])
-            }
-
-            cg.restoreGState()
         }
-        let texture = SKTexture(image: image)
-        texture.filteringMode = .linear
-        return texture
+
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
+        guard let provider = CGDataProvider(data: Data(pixels) as CFData),
+              let baseImage = CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32,
+                                      bytesPerRow: width * 4, space: colorSpace, bitmapInfo: bitmapInfo,
+                                      provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent) else {
+            return UIImage()
+        }
+
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: width, height: height), format: format)
+        let image = renderer.image { ctx in
+            UIImage(cgImage: baseImage).draw(in: CGRect(x: 0, y: 0, width: width, height: height))
+            guard number > 0 else { return }
+            // Near the equator the equirectangular projection is nearly conformal, so the number can be
+            // drawn flat inside the circle. Circle radius in pixels along the equator:
+            let pixelRadius = circleRadius / (2 * .pi) * CGFloat(width)
+            let fontSize = pixelRadius * (number >= 10 ? 1.15 : 1.45)
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.alignment = .center
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: UIFont.systemFont(ofSize: fontSize, weight: .heavy),
+                .foregroundColor: UIColor(white: 0.08, alpha: 1),
+                .paragraphStyle: paragraph,
+            ]
+            let text = NSAttributedString(string: "\(number)", attributes: attributes)
+            let textSize = text.size()
+            for u in [0.25, 0.75] {
+                let cx = CGFloat(u) * CGFloat(width)
+                text.draw(in: CGRect(x: cx - pixelRadius, y: CGFloat(height) / 2 - textSize.height / 2,
+                                     width: pixelRadius * 2, height: textSize.height))
+            }
+        }
+        sphereMapCache[number] = image
+        return image
     }
 
-    static func shadowTexture(diameter: CGFloat) -> SKTexture {
-        let d = diameter * 1.5
-        let format = UIGraphicsImageRendererFormat()
-        format.scale = 2
-        format.opaque = false
-        let renderer = UIGraphicsImageRenderer(size: CGSize(width: d, height: d), format: format)
-        let image = renderer.image { ctx in
-            let cg = ctx.cgContext
-            let colorSpace = CGColorSpaceCreateDeviceRGB()
-            if let gradient = CGGradient(colorsSpace: colorSpace,
-                                         colors: [UIColor(white: 0, alpha: 0.55).cgColor,
-                                                  UIColor(white: 0, alpha: 0.35).cgColor,
-                                                  UIColor(white: 0, alpha: 0).cgColor] as CFArray,
-                                         locations: [0, 0.55, 1]) {
-                let center = CGPoint(x: d / 2, y: d / 2)
-                cg.drawRadialGradient(gradient, startCenter: center, startRadius: 0,
-                                      endCenter: center, endRadius: d / 2, options: [])
-            }
-        }
-        return SKTexture(image: image)
+    /// 0 → 1 across `[-softness, softness]`.
+    private static func smooth(_ value: CGFloat, _ softness: CGFloat) -> CGFloat {
+        min(max((value + softness) / (2 * softness), 0), 1)
     }
 }
