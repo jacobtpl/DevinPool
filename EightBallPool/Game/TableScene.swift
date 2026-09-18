@@ -46,9 +46,13 @@ final class TableScene {
         let camera = SCNCamera()
         camera.fieldOfView = 66
         camera.projectionDirection = .vertical
-        camera.zNear = 0.3
-        camera.zFar = 600
-        camera.wantsHDR = false
+        camera.zNear = 1
+        camera.zFar = 400
+        camera.wantsHDR = true
+        camera.wantsExposureAdaptation = false
+        camera.exposureOffset = -0.1
+        camera.bloomIntensity = 0.12
+        camera.bloomThreshold = 0.85
         cameraNode.camera = camera
         scene.rootNode.addChildNode(cameraNode)
     }
@@ -76,26 +80,27 @@ final class TableScene {
         let rail = Self.railWidth
         let h = Self.cushionHeight
 
-        // Cloth, running under the cushions and rails so pocket mouths show cloth.
+        // Cloth: one slab running under the cushions and rails (a single mesh, so there are no
+        // coplanar seams to shimmer).
         let clothRect = felt.insetBy(dx: -(depth + rail), dy: -(depth + rail))
         let cloth = SCNBox(width: clothRect.width, height: 0.4, length: clothRect.height, chamferRadius: 0)
-        cloth.firstMaterial = material(Self.feltColor, roughness: 0.95)
+        cloth.firstMaterial = clothMaterial(Self.feltColor)
         let clothNode = SCNNode(geometry: cloth)
-        clothNode.position = SCNVector3(Float(clothRect.midX), -0.2, Float(-clothRect.midY))
+        clothNode.position = Self.scenePoint(CGPoint(x: clothRect.midX, y: clothRect.midY), height: -0.2)
         scene.rootNode.addChildNode(clothNode)
 
-        // Pockets: dark wells sunk into the cloth.
+        // Pockets: an unlit black opening sitting just on the cloth, with a leather rim.
         for p in geometry.pockets {
-            let well = SCNCylinder(radius: p.radius * 0.95, height: 6)
-            well.firstMaterial = material(UIColor(white: 0.02, alpha: 1), roughness: 1)
-            well.firstMaterial?.lightingModel = .constant
-            let node = SCNNode(geometry: well)
-            node.position = Self.scenePoint(p.center, height: -2.99)
+            let opening = SCNCylinder(radius: p.radius + 0.1, height: 0.02)
+            opening.firstMaterial = material(UIColor(white: 0.02, alpha: 1), roughness: 1)
+            opening.firstMaterial?.lightingModel = .constant
+            let node = SCNNode(geometry: opening)
+            node.position = Self.scenePoint(p.center, height: 0.02)
             scene.rootNode.addChildNode(node)
-            let rim = SCNTorus(ringRadius: p.radius * 0.95, pipeRadius: 0.12)
-            rim.firstMaterial = material(UIColor(white: 0.12, alpha: 1), roughness: 0.6)
+            let rim = SCNTorus(ringRadius: p.radius, pipeRadius: 0.16)
+            rim.firstMaterial = material(UIColor(white: 0.10, alpha: 1), roughness: 0.55)
             let rimNode = SCNNode(geometry: rim)
-            rimNode.position = Self.scenePoint(p.center, height: 0.02)
+            rimNode.position = Self.scenePoint(p.center, height: 0.0)
             scene.rootNode.addChildNode(rimNode)
         }
 
@@ -116,7 +121,7 @@ final class TableScene {
             let shape = SCNShape(path: path, extrusionDepth: h)
             shape.chamferRadius = 0.25
             shape.chamferMode = .front
-            shape.firstMaterial = material(Self.cushionColor, roughness: 0.9)
+            shape.firstMaterial = clothMaterial(Self.cushionColor)
             let node = SCNNode(geometry: shape)
             node.simdOrientation = Self.toScene
             node.position = SCNVector3(0, Float(h / 2), 0)
@@ -132,9 +137,9 @@ final class TableScene {
             CGRect(x: outer.minX, y: inner.minY, width: rail, height: inner.height),
             CGRect(x: inner.maxX, y: inner.minY, width: rail, height: inner.height),
         ]
-        let woodMaterial = material(Self.woodColor, roughness: 0.45)
+        let woodMaterial = material(Self.woodColor, roughness: 0.32)
         for plank in planks {
-            let railShape = SCNShape(path: plankPath(plank), extrusionDepth: h + 0.6)
+            let railShape = SCNShape(path: cutPath(plank), extrusionDepth: h + 0.6)
             railShape.chamferRadius = 0.25
             railShape.chamferMode = .front
             railShape.firstMaterial = woodMaterial
@@ -148,10 +153,10 @@ final class TableScene {
         let diamondMaterial = material(UIColor(red: 0.93, green: 0.88, blue: 0.75, alpha: 1), roughness: 0.3)
         let diamondOffset = depth + rail * 0.55
         func addDiamond(_ p: CGPoint) {
-            let d = SCNBox(width: 0.55, height: 0.05, length: 0.55, chamferRadius: 0)
+            let d = SCNBox(width: 0.55, height: 0.08, length: 0.55, chamferRadius: 0)
             d.firstMaterial = diamondMaterial
             let n = SCNNode(geometry: d)
-            n.position = Self.scenePoint(p, height: h + 0.02)
+            n.position = Self.scenePoint(p, height: h + 0.01)
             n.eulerAngles.y = .pi / 4
             scene.rootNode.addChildNode(n)
         }
@@ -169,14 +174,14 @@ final class TableScene {
 
         // Spots and head string on the cloth.
         let spot = SCNCylinder(radius: r * 0.2, height: 0.02)
-        spot.firstMaterial = material(UIColor(white: 1, alpha: 0.5), roughness: 1)
+        spot.firstMaterial = material(UIColor(white: 0.85, alpha: 1), roughness: 1)
         let spotNode = SCNNode(geometry: spot)
-        spotNode.position = Self.scenePoint(geometry.footSpot, height: 0.01)
+        spotNode.position = Self.scenePoint(geometry.footSpot, height: 0.03)
         scene.rootNode.addChildNode(spotNode)
-        let headString = SCNBox(width: felt.width, height: 0.015, length: 0.08, chamferRadius: 0)
-        headString.firstMaterial = material(UIColor(white: 1, alpha: 0.18), roughness: 1)
+        let headString = SCNBox(width: felt.width, height: 0.02, length: 0.06, chamferRadius: 0)
+        headString.firstMaterial = material(UIColor(red: 0.16, green: 0.50, blue: 0.29, alpha: 1), roughness: 1)
         let headNode = SCNNode(geometry: headString)
-        headNode.position = Self.scenePoint(CGPoint(x: felt.midX, y: geometry.headSpot.y), height: 0.01)
+        headNode.position = Self.scenePoint(CGPoint(x: felt.midX, y: geometry.headSpot.y), height: 0.03)
         scene.rootNode.addChildNode(headNode)
 
         // Body, legs and floor.
@@ -234,34 +239,127 @@ final class TableScene {
         }
     }
 
-    /// Outline of a rail plank with the pocket openings cut out: the rectangle is sampled densely and
-    /// any vertex inside a pocket circle is pushed radially onto the circle, which traces the pocket arc.
-    private func plankPath(_ rect: CGRect) -> UIBezierPath {
+    /// Outline of a rectangle with the pocket openings cut out of it. The rectangle boundary is sampled
+    /// into a closed polygon; for each pocket, the contiguous run of boundary points inside the circle is
+    /// replaced by the circle arc that lies inside the rectangle. Works whether the pocket centre is
+    /// inside, outside or on the rectangle. Returns an empty path if the pocket swallows the rectangle.
+    private func cutPath(_ rect: CGRect) -> UIBezierPath {
         let corners = [
             CGPoint(x: rect.minX, y: rect.minY), CGPoint(x: rect.maxX, y: rect.minY),
             CGPoint(x: rect.maxX, y: rect.maxY), CGPoint(x: rect.minX, y: rect.maxY),
         ]
-        let path = UIBezierPath()
-        var first = true
+        var pts: [CGPoint] = []
         for i in 0..<4 {
             let a = corners[i], b = corners[(i + 1) % 4]
-            let steps = max(2, Int(hypot(b.x - a.x, b.y - a.y) / 0.08))
+            let steps = max(2, Int(hypot(b.x - a.x, b.y - a.y) / 0.1))
             for s in 0..<steps {
                 let t = CGFloat(s) / CGFloat(steps)
-                var p = CGPoint(x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t)
-                for pocket in geometry.pockets {
-                    let d = hypot(p.x - pocket.center.x, p.y - pocket.center.y)
-                    if d < pocket.radius {
-                        let k = d > 1e-6 ? pocket.radius / d : 1
-                        p = CGPoint(x: pocket.center.x + (p.x - pocket.center.x) * k,
-                                    y: pocket.center.y + (p.y - pocket.center.y) * k)
-                    }
-                }
-                if first { path.move(to: p); first = false } else { path.addLine(to: p) }
+                pts.append(CGPoint(x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t))
             }
         }
+
+        for pocket in geometry.pockets {
+            let c = pocket.center, r = pocket.radius
+            func inside(_ p: CGPoint) -> Bool { hypot(p.x - c.x, p.y - c.y) < r }
+            let flags = pts.map(inside)
+            guard flags.contains(true) else { continue }
+            guard flags.contains(false) else { return UIBezierPath() }
+            // Rotate so the list starts just after the run: index of the first outside point that follows an inside one.
+            let n = pts.count
+            let exit = (0..<n).first { flags[$0] && !flags[($0 + 1) % n] }.map { ($0 + 1) % n }!
+            pts = Array(pts[exit...] + pts[..<exit])
+            let keep = pts.filter { !inside($0) }        // the run is now a single trailing block
+            let pEntry = keep.last!, pExit = keep.first!  // boundary points just before / after the hole
+            let aEntry = atan2(pEntry.y - c.y, pEntry.x - c.x)
+            let aExit = atan2(pExit.y - c.y, pExit.x - c.x)
+            // Take the arc whose midpoint is inside the rectangle (the other one lies in the pocket).
+            var sweep = aExit - aEntry
+            if sweep <= -.pi { sweep += 2 * .pi } else if sweep > .pi { sweep -= 2 * .pi }
+            var mid = CGPoint(x: c.x + r * cos(aEntry + sweep / 2), y: c.y + r * sin(aEntry + sweep / 2))
+            if !rect.insetBy(dx: -1e-3, dy: -1e-3).contains(mid) {
+                sweep += sweep > 0 ? -2 * .pi : 2 * .pi
+                mid = CGPoint(x: c.x + r * cos(aEntry + sweep / 2), y: c.y + r * sin(aEntry + sweep / 2))
+            }
+            let segments = max(4, Int(abs(sweep) * r / 0.08))
+            var arc: [CGPoint] = []
+            for k in 1..<segments {
+                let a = aEntry + sweep * CGFloat(k) / CGFloat(segments)
+                arc.append(CGPoint(x: c.x + r * cos(a), y: c.y + r * sin(a)))
+            }
+            pts = keep + arc
+        }
+
+        let path = UIBezierPath()
+        guard let firstPoint = pts.first else { return path }
+        path.move(to: firstPoint)
+        for p in pts.dropFirst() { path.addLine(to: p) }
         path.close()
         return path
+    }
+
+    /// Woven cloth. `SCNShape` has no texture coordinates, so the weave is sampled by world position
+    /// in a surface shader modifier, which also keeps the pattern continuous across the cloth pieces.
+    private func clothMaterial(_ color: UIColor) -> SCNMaterial {
+        let m = material(color, roughness: 1)
+        m.shaderModifiers = [.surface: """
+        #pragma arguments
+        texture2d<float> weave;
+        #pragma body
+        constexpr sampler weaveSampler(filter::linear, mip_filter::linear, address::repeat);
+        float3 worldPos = (scn_frame.inverseViewTransform * float4(_surface.position, 1.0)).xyz;
+        float2 uv = worldPos.xz * 0.5 + worldPos.y * 0.5;
+        _surface.diffuse.rgb *= weave.sample(weaveSampler, uv).rgb;
+        """]
+        m.setValue(SCNMaterialProperty(contents: Self.clothTexture()), forKey: "weave")
+        return m
+    }
+
+    /// Fine woven-cloth texture (brightness only, ~1 on average).
+    private static func clothTexture() -> UIImage {
+        let size = 128
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: size, height: size),
+                                               format: { let f = UIGraphicsImageRendererFormat(); f.scale = 1; return f }())
+        return renderer.image { ctx in
+            let cg = ctx.cgContext
+            var seed: UInt32 = 12345
+            func rnd() -> CGFloat {
+                seed = seed &* 1664525 &+ 1013904223
+                return CGFloat(seed >> 8) / CGFloat(1 << 24)
+            }
+            for y in 0..<size {
+                for x in 0..<size {
+                    let weave: CGFloat = ((x + y) % 2 == 0) ? 0.05 : -0.05
+                    let v = 0.88 + weave + (rnd() - 0.5) * 0.12
+                    cg.setFillColor(UIColor(white: v, alpha: 1).cgColor)
+                    cg.fill(CGRect(x: x, y: y, width: 1, height: 1))
+                }
+            }
+        }
+    }
+
+    /// Equirectangular environment for reflections: a dark room with two bright lamp panels overhead.
+    private static func environmentMap() -> UIImage {
+        let w = 512, h = 256
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: w, height: h),
+                                               format: { let f = UIGraphicsImageRendererFormat(); f.scale = 1; return f }())
+        return renderer.image { ctx in
+            let cg = ctx.cgContext
+            let colors = [UIColor(red: 0.20, green: 0.16, blue: 0.13, alpha: 1).cgColor,
+                          UIColor(red: 0.09, green: 0.07, blue: 0.06, alpha: 1).cgColor,
+                          UIColor(red: 0.03, green: 0.05, blue: 0.03, alpha: 1).cgColor] as CFArray
+            let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: [0, 0.5, 1])!
+            cg.drawLinearGradient(gradient, start: .zero, end: CGPoint(x: 0, y: h), options: [])
+            // Lamp panels near the zenith (top rows of the equirect map), softened by a shadow.
+            cg.setShadow(offset: .zero, blur: 18, color: UIColor(white: 1, alpha: 0.9).cgColor)
+            cg.setFillColor(UIColor(red: 1, green: 0.97, blue: 0.9, alpha: 1).cgColor)
+            for cx in [w / 4, 3 * w / 4] {
+                cg.fill(CGRect(x: cx - 70, y: 6, width: 140, height: 26))
+            }
+            cg.setShadow(offset: .zero, blur: 0, color: nil)
+            // Faint horizon glow from the lit cloth below.
+            cg.setFillColor(UIColor(red: 0.05, green: 0.16, blue: 0.08, alpha: 1).cgColor)
+            cg.fill(CGRect(x: 0, y: h * 3 / 4, width: w, height: h / 4))
+        }
     }
 
     private func material(_ color: UIColor, roughness: CGFloat) -> SCNMaterial {
@@ -277,9 +375,12 @@ final class TableScene {
 
     private func buildLights() {
         let felt = geometry.felt
+        scene.lightingEnvironment.contents = Self.environmentMap()
+        scene.lightingEnvironment.intensity = 1.2
+
         let ambient = SCNLight()
         ambient.type = .ambient
-        ambient.intensity = 450
+        ambient.intensity = 120
         ambient.color = UIColor(white: 0.9, alpha: 1)
         let ambientNode = SCNNode()
         ambientNode.light = ambient
@@ -289,18 +390,19 @@ final class TableScene {
         for (i, y) in [felt.minY + felt.height * 0.3, felt.minY + felt.height * 0.7].enumerated() {
             let spot = SCNLight()
             spot.type = .spot
-            spot.intensity = 2600
+            spot.intensity = 3000
             spot.spotInnerAngle = 40
             spot.spotOuterAngle = 95
             spot.color = UIColor(red: 1, green: 0.97, blue: 0.9, alpha: 1)
             spot.castsShadow = i == 0
             spot.shadowMode = .forward
-            spot.shadowSampleCount = 8
-            spot.shadowRadius = 3
-            spot.shadowColor = UIColor(white: 0, alpha: 0.6)
-            spot.shadowMapSize = CGSize(width: 2048, height: 2048)
-            spot.zNear = 5
-            spot.zFar = 120
+            spot.shadowSampleCount = 16
+            spot.shadowRadius = 2
+            spot.shadowBias = 2
+            spot.shadowColor = UIColor(white: 0, alpha: 0.7)
+            spot.shadowMapSize = CGSize(width: 4096, height: 4096)
+            spot.zNear = 40
+            spot.zFar = 140
             let node = SCNNode()
             node.light = spot
             node.position = Self.scenePoint(CGPoint(x: felt.midX, y: y), height: Self.lampHeight)
@@ -321,8 +423,15 @@ final class TableScene {
             let m = SCNMaterial()
             m.lightingModel = .physicallyBased
             m.diffuse.contents = BallTextures.sphereMap(number: ball.number)
-            m.roughness.contents = 0.18
+            m.diffuse.mipFilter = .linear
+            m.diffuse.minificationFilter = .linear
+            m.diffuse.magnificationFilter = .linear
+            m.diffuse.maxAnisotropy = 8
+            // Polished phenolic resin: a hard gloss over the colour.
+            m.roughness.contents = 0.22
             m.metalness.contents = 0
+            m.clearCoat.contents = 1.0
+            m.clearCoatRoughness.contents = 0.08
             sphere.firstMaterial = m
             let node = SCNNode(geometry: sphere)
             node.isHidden = ball.isPocketed
@@ -442,7 +551,7 @@ final class TableScene {
         let m = SCNMaterial()
         m.lightingModel = .constant
         m.diffuse.contents = UIColor(white: 1, alpha: 0.28)
-        m.isDoubleSided = true
+        m.writesToDepthBuffer = false
         sphere.firstMaterial = m
         ghostBall.geometry = sphere
         ghostBall.isHidden = true

@@ -29,6 +29,8 @@ final class GameModel: ObservableObject {
     @Published var spin: CGPoint = .zero
     @Published var isOpenTable = true
     @Published var cameraMode: CameraMode = .pov
+    /// Aim guide (cue-ball path, ghost ball, object-ball line); off for a realistic game.
+    @Published var showGuide = false
 
     /// Tip offset in ball radii is capped at the miscue limit.
     static let maxSpinOffset: CGFloat = PhysicsEngine.miscueOffset

@@ -191,6 +191,17 @@ private struct ControlsView: View {
             .buttonStyle(.plain)
             .accessibilityLabel(model.cameraMode == .pov ? "Overhead view" : "Player view")
 
+            Button {
+                model.showGuide.toggle()
+            } label: {
+                Image(systemName: model.showGuide ? "scope" : "circle.dashed")
+                    .font(.system(size: 16, weight: .bold))
+                    .frame(width: 44, height: 44)
+                    .background(Circle().fill(Color.white.opacity(model.showGuide ? 0.28 : 0.12)))
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(model.showGuide ? "Hide aim guide" : "Show aim guide")
+
             Spacer(minLength: 0)
 
             VStack(spacing: 2) {
@@ -198,10 +209,12 @@ private struct ControlsView: View {
                     .font(.system(.caption2, design: .rounded, weight: .bold))
                     .foregroundStyle(.white.opacity(0.7))
                     .lineLimit(1)
-                Text(model.power > 0.05 ? "Release to shoot" : (model.cameraMode == .pov ? "Drag to aim · pull bar to shoot" : "Pull the bar down to set power"))
+                Text(model.power > 0.05 ? "Release to shoot" : "Drag to aim · pull bar to shoot")
                     .font(.system(.caption2, design: .rounded))
                     .foregroundStyle(.white.opacity(0.45))
-                    .lineLimit(1)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+                    .minimumScaleFactor(0.8)
             }
 
             Spacer(minLength: 0)

@@ -249,8 +249,12 @@ final class GameController {
             return
         }
         let tip = model?.spin ?? .zero
-        let launch = engine.squirtedDirection(aimDirection, tipOffset: tip)
-        table.showGuide(from: cue.position, prediction: engine.predict(from: cue.position, direction: launch, balls: balls))
+        if model?.showGuide == true, phase != .shooting {
+            let launch = engine.squirtedDirection(aimDirection, tipOffset: tip)
+            table.showGuide(from: cue.position, prediction: engine.predict(from: cue.position, direction: launch, balls: balls))
+        } else {
+            table.hideGuide()
+        }
 
         if phase != .shooting {
             let power = min(max(model?.power ?? 0, 0), 1)
